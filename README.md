@@ -2,6 +2,21 @@
 
 A new Flutter project.
 
+## Ejecutar la aplicación
+
+Para arrancar el frontend en **Microsoft Edge** en el puerto **3000**:
+
+```bash
+flutter pub get
+flutter run -d edge --web-port=3000
+```
+
+La app se abrirá en: **http://localhost:3000**
+
+Otras opciones:
+- Chrome: `flutter run -d chrome --web-port=3000`
+- Windows (escritorio): `flutter run -d windows`
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

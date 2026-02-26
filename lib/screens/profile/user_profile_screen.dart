@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../services/auth_service.dart';
 import '../../services/hogar_service.dart';
 import '../../models/intolerancia.dart';
+import '../../theme/app_colors.dart';
 import '../../widgets/main_layout.dart';
 
 class UserProfileScreen extends StatefulWidget {
@@ -27,6 +28,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   bool _changingPassword = false;
   String? _loadError;
   final ImagePicker _imagePicker = ImagePicker();
+  // Perfil nutricional (todos opcionales)
+  late TextEditingController _pesoKgController;
+  late TextEditingController _alturaCmController;
+  late TextEditingController _pesoHabitualController;
+  late TextEditingController _cinturaCmController;
+  late TextEditingController _caderaCmController;
+  late TextEditingController _condicionesMedicasController;
+  late TextEditingController _medicacionController;
+  String? _sexo;
+  String? _nivelActividad;
+  String? _objetivoDietetico;
+  String? _embarazoLactancia;
 
   @override
   void initState() {
@@ -36,7 +49,52 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     _notasController = TextEditingController(text: user?.notas ?? '');
     _birthDate = user?.birthDate;
     _selectedIntoleranciaIds = Set.from(user?.intoleranciaIds ?? []);
+    _pesoKgController = TextEditingController(text: user?.pesoKg != null ? user!.pesoKg.toString() : '');
+    _alturaCmController = TextEditingController(text: user?.alturaCm != null ? user!.alturaCm.toString() : '');
+    _pesoHabitualController = TextEditingController(text: user?.pesoHabitualKg != null ? user!.pesoHabitualKg.toString() : '');
+    _cinturaCmController = TextEditingController(text: user?.circunferenciaCinturaCm != null ? user!.circunferenciaCinturaCm.toString() : '');
+    _caderaCmController = TextEditingController(text: user?.circunferenciaCaderaCm != null ? user!.circunferenciaCaderaCm.toString() : '');
+    _condicionesMedicasController = TextEditingController(text: user?.condicionesMedicas ?? '');
+    _medicacionController = TextEditingController(text: user?.medicacionActual ?? '');
+    _sexo = user?.sexo;
+    _nivelActividad = user?.nivelActividad;
+    _objetivoDietetico = user?.objetivoDietetico;
+    _embarazoLactancia = user?.embarazoLactancia;
     _loadIntolerancias();
+  }
+
+  double? get _pesoKg => double.tryParse(_pesoKgController.text.trim());
+  double? get _alturaCm => double.tryParse(_alturaCmController.text.trim());
+  double? get _pesoHabitualKg => double.tryParse(_pesoHabitualController.text.trim());
+  double? get _cinturaCm => double.tryParse(_cinturaCmController.text.trim());
+  double? get _caderaCm => double.tryParse(_caderaCmController.text.trim());
+  double? get _localImc {
+    final p = _pesoKg;
+    final a = _alturaCm;
+    if (p == null || a == null || a <= 0) return null;
+    return p / ((a / 100) * (a / 100));
+  }
+  double? get _localIcc {
+    final c = _cinturaCm;
+    final d = _caderaCm;
+    if (c == null || d == null || d <= 0) return null;
+    return c / d;
+  }
+  double? get _localTmb {
+    final p = _pesoKg;
+    final a = _alturaCm;
+    if (p == null || a == null || _sexo == null || _edad == null) return null;
+    var tmb = 10 * p + 6.25 * a - 5 * _edad!;
+    if (_sexo == 'M') tmb += 5; else tmb -= 161;
+    return tmb.roundToDouble();
+  }
+  double? get _localGet {
+    final tmb = _localTmb;
+    if (tmb == null || _nivelActividad == null) return null;
+    const factors = {'sedentario': 1.2, 'ligero': 1.375, 'moderado': 1.55, 'activo': 1.725, 'muy_activo': 1.9};
+    final f = factors[_nivelActividad!];
+    if (f == null) return null;
+    return (tmb * f).roundToDouble();
   }
 
   Future<void> _loadIntolerancias() async {
@@ -168,6 +226,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ? null
             : _notasController.text.trim(),
         intoleranciaIds: _selectedIntoleranciaIds.toList(),
+        pesoKg: _pesoKg,
+        alturaCm: _alturaCm,
+        pesoHabitualKg: _pesoHabitualKg,
+        circunferenciaCinturaCm: _cinturaCm,
+        circunferenciaCaderaCm: _caderaCm,
+        sexo: _sexo,
+        nivelActividad: _nivelActividad,
+        objetivoDietetico: _objetivoDietetico,
+        condicionesMedicas: _condicionesMedicasController.text.trim().isEmpty ? null : _condicionesMedicasController.text.trim(),
+        medicacionActual: _medicacionController.text.trim().isEmpty ? null : _medicacionController.text.trim(),
+        embarazoLactancia: _sexo == 'M' ? 'no' : _embarazoLactancia,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -182,6 +251,224 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Widget _buildNutricionSection(BuildContext context) {
+    return ExpansionTile(
+      title: const Text('Perfil nutricional'),
+      subtitle: const Text(
+        'Opcional. Para dieta personalizada (ej. clientes Gold).',
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+      ),
+      initiallyExpanded: _pesoKg != null || _alturaCm != null || _sexo != null,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _pesoKgController,
+                decoration: const InputDecoration(
+                  labelText: 'Peso (kg)',
+                  helperText: 'Tu peso actual.',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _alturaCmController,
+                decoration: const InputDecoration(
+                  labelText: 'Altura (cm)',
+                  helperText: 'Tu altura en centímetros.',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _pesoHabitualController,
+                decoration: const InputDecoration(
+                  labelText: 'Peso habitual (kg)',
+                  helperText: 'El peso que solías tener antes de cambios recientes; sirve de referencia al nutricionista.',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _cinturaCmController,
+                      decoration: const InputDecoration(
+                        labelText: 'Cintura (cm)',
+                        helperText: 'Perímetro de cintura.',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _caderaCmController,
+                      decoration: const InputDecoration(
+                        labelText: 'Cadera (cm)',
+                        helperText: 'Perímetro de cadera.',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _sexo,
+                decoration: const InputDecoration(
+                  labelText: 'Sexo',
+                  helperText: 'Para fórmulas de gasto energético.',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'M', child: Text('Hombre')),
+                  DropdownMenuItem(value: 'F', child: Text('Mujer')),
+                  DropdownMenuItem(value: 'otro', child: Text('Otro')),
+                  DropdownMenuItem(value: 'no_indica', child: Text('No indicar')),
+                ],
+                onChanged: (v) => setState(() => _sexo = v),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _nivelActividad,
+                decoration: const InputDecoration(
+                  labelText: 'Nivel de actividad',
+                  helperText: 'Qué tan activo eres en el día a día; afecta el cálculo de calorías.',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'sedentario', child: Text('Sedentario')),
+                  DropdownMenuItem(value: 'ligero', child: Text('Ligero')),
+                  DropdownMenuItem(value: 'moderado', child: Text('Moderado')),
+                  DropdownMenuItem(value: 'activo', child: Text('Activo')),
+                  DropdownMenuItem(value: 'muy_activo', child: Text('Muy activo')),
+                ],
+                onChanged: (v) => setState(() => _nivelActividad = v),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _objetivoDietetico,
+                decoration: const InputDecoration(
+                  labelText: 'Objetivo dietético',
+                  helperText: 'Meta principal de la dieta.',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'mantener_peso', child: Text('Mantener peso')),
+                  DropdownMenuItem(value: 'perder_peso', child: Text('Perder peso')),
+                  DropdownMenuItem(value: 'ganar_peso', child: Text('Ganar peso')),
+                  DropdownMenuItem(value: 'rendimiento_deportivo', child: Text('Rendimiento deportivo')),
+                  DropdownMenuItem(value: 'otro', child: Text('Otro')),
+                ],
+                onChanged: (v) => setState(() => _objetivoDietetico = v),
+              ),
+              if (_sexo != 'M') ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: _embarazoLactancia,
+                  decoration: const InputDecoration(
+                    labelText: 'Embarazo / lactancia',
+                    helperText: 'Afecta las necesidades nutricionales.',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'no', child: Text('No')),
+                    DropdownMenuItem(value: 'embarazada', child: Text('Embarazada')),
+                    DropdownMenuItem(value: 'lactancia', child: Text('Lactancia')),
+                  ],
+                  onChanged: (v) => setState(() => _embarazoLactancia = v),
+                ),
+              ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: _condicionesMedicasController,
+                decoration: const InputDecoration(
+                  labelText: 'Condiciones médicas',
+                  helperText: 'Enfermedades o trastornos que puedan afectar la dieta (ej. diabetes, HTA).',
+                  hintText: 'Ej: diabetes, HTA, gastritis...',
+                  border: OutlineInputBorder(),
+                  alignLabelWithHint: true,
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _medicacionController,
+                decoration: const InputDecoration(
+                  labelText: 'Medicación actual',
+                  helperText: 'Medicamentos que tomes de forma habitual y puedan influir en la dieta.',
+                  hintText: 'Medicamentos que puedan afectar la dieta',
+                  border: OutlineInputBorder(),
+                  alignLabelWithHint: true,
+                ),
+                maxLines: 2,
+              ),
+              if (_localImc != null || _localIcc != null || _localTmb != null || _localGet != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Valores calculados',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'IMC: Índice de masa corporal (peso/altura²). ICC: Índice cintura/cadera. '
+                  'TMB: calorías en reposo al día. GET: calorías totales al día según tu actividad.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    if (_localImc != null)
+                      Chip(
+                        label: Text('IMC: ${_localImc!.toStringAsFixed(1)} kg/m²'),
+                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      ),
+                    if (_localIcc != null)
+                      Chip(
+                        label: Text('ICC: ${_localIcc!.toStringAsFixed(2)}'),
+                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      ),
+                    if (_localTmb != null)
+                      Chip(
+                        label: Text('TMB: ${_localTmb!.toInt()} kcal/día'),
+                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      ),
+                    if (_localGet != null)
+                      Chip(
+                        label: Text('GET: ${_localGet!.toInt()} kcal/día'),
+                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _showChangePasswordDialog() async {
@@ -292,13 +579,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   void dispose() {
     _nameController.dispose();
     _notasController.dispose();
+    _pesoKgController.dispose();
+    _alturaCmController.dispose();
+    _pesoHabitualController.dispose();
+    _cinturaCmController.dispose();
+    _caderaCmController.dispose();
+    _condicionesMedicasController.dispose();
+    _medicacionController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    const verdeBetis = Color(0xFF00914E);
-
     return MainLayout(
       title: 'Mi Perfil',
       child: _loading
@@ -347,7 +639,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                     customBorder: const CircleBorder(),
                                     child: CircleAvatar(
                                       radius: 48,
-                                      backgroundColor: Colors.grey.shade200,
+                                      backgroundColor: AppColors.stainlessLight,
                                       backgroundImage: hasAvatar
                                           ? CachedNetworkImageProvider(
                                               avatarUrl)
@@ -357,7 +649,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                           : Text(
                                               initial,
                                               style: TextStyle(
-                                                color: verdeBetis,
+                                                color: AppColors.brandGreen,
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 32,
                                               ),
@@ -369,7 +661,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                   right: 0,
                                   bottom: 0,
                                   child: Material(
-                                    color: verdeBetis,
+                                    color: AppColors.brandGreen,
                                     shape: const CircleBorder(),
                                     child: InkWell(
                                       onTap: _showAvatarSourceSheet,
@@ -440,11 +732,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 }
                               });
                             },
-                            selectedColor: verdeBetis.withOpacity(0.3),
-                            checkmarkColor: verdeBetis,
+                            selectedColor: AppColors.brandGreen.withOpacity(0.3),
+                            checkmarkColor: AppColors.brandGreen,
                             side: BorderSide(
                               color: selected
-                                  ? verdeBetis
+                                  ? AppColors.brandGreen
                                   : Theme.of(context).dividerColor,
                               width: selected ? 2 : 1,
                             ),
@@ -454,6 +746,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                           );
                         }).toList(),
                       ),
+                      const SizedBox(height: 24),
+                      _buildNutricionSection(context),
                       const SizedBox(height: 24),
                       TextField(
                         controller: _notasController,

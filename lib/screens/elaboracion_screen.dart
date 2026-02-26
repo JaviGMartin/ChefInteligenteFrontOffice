@@ -7,6 +7,7 @@ import '../models/recipe.dart';
 import '../services/alarma_notification_service.dart';
 import '../services/recipe_service.dart';
 import '../state/kitchen_state.dart';
+import '../theme/app_colors.dart';
 import '../widgets/main_layout.dart';
 
 /// Formato legible del tiempo de un paso (ej. "5 min", "1 h 30 min").
@@ -262,7 +263,7 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('¡Receta cocinada! Stock actualizado.'),
-          backgroundColor: Colors.green,
+          backgroundColor: AppColors.brandGreen,
           behavior: SnackBarBehavior.floating,
         ),
       );

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../models/recipe.dart';
+import '../theme/app_colors.dart';
 import '../services/recipe_service.dart';
 import '../services/stock_service.dart';
+import '../widgets/ingrediente_selector.dart';
 import '../widgets/main_layout.dart';
+import '../widgets/proponer_ingrediente_dialog.dart';
 
 /// Una fila del formulario: ingrediente + cantidad + unidad.
 class _IngredienteRow {
@@ -76,6 +79,21 @@ class _ElaboracionForm {
   }
 }
 
+/// Bloque que agrupa una o más elaboraciones (varias = elaboraciones paralelas).
+class _BloqueElaboracion {
+  final List<_ElaboracionForm> elaboraciones = [];
+
+  _BloqueElaboracion([List<_ElaboracionForm>? elaboracionesIniciales]) {
+    if (elaboracionesIniciales != null) elaboraciones.addAll(elaboracionesIniciales);
+  }
+
+  void dispose() {
+    for (final e in elaboraciones) {
+      e.dispose();
+    }
+  }
+}
+
 class CreateRecipeScreen extends StatefulWidget {
   const CreateRecipeScreen({super.key});
 
@@ -90,15 +108,35 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
   final _imagenUrlController = TextEditingController();
   final _tiempoController = TextEditingController();
   final _porcionesController = TextEditingController();
+  final _herramientasController = TextEditingController();
   String? _dificultad;
   List<_IngredienteRow> _rows = [_IngredienteRow()];
-  final List<_ElaboracionForm> _elaboraciones = [];
+  final List<_BloqueElaboracion> _bloquesElaboracion = [];
   bool _saving = false;
+
+  /// Todas las elaboraciones de todos los bloques (para validación y payload).
+  Iterable<_ElaboracionForm> get _todasElaboraciones =>
+      _bloquesElaboracion.expand((b) => b.elaboraciones);
 
   List<Ingredient> _ingredientes = [];
   List<UnidadMedida> _unidades = [];
   List<UnidadMedida> get _unidadesTiempo =>
       _unidades.where((u) => u.tipo == 'tiempo').toList();
+  /// Unidades para cantidad de ingredientes (excluye tiempo: h, min, s).
+  List<UnidadMedida> get _unidadesParaIngredientes =>
+      _unidades.where((u) => u.tipo != 'tiempo').toList();
+
+  /// Unidades a mostrar para la fila según el ingrediente seleccionado.
+  /// Si el ingrediente tiene tipos_unidad definidos, solo esas; si no, todas las no tiempo.
+  List<UnidadMedida> _unidadesParaFila(int? ingredienteId) {
+    if (ingredienteId == null) return _unidadesParaIngredientes;
+    final ing = _ingredientes.where((i) => i.id == ingredienteId).firstOrNull;
+    if (ing == null || ing.tiposUnidad == null || ing.tiposUnidad!.isEmpty) {
+      return _unidadesParaIngredientes;
+    }
+    return _unidades.where((u) => (u.tipo != null) && ing.tiposUnidad!.contains(u.tipo!)).toList();
+  }
+
   bool _loading = true;
   String? _loadError;
 
@@ -119,11 +157,11 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
           _ingredientes = results[0] as List<Ingredient>;
           _unidades = results[1] as List<UnidadMedida>;
           _loading = false;
-          if (_rows.isNotEmpty && _rows.first.unidadMedidaId == null && _unidades.isNotEmpty) {
+          if (_rows.isNotEmpty && _rows.first.unidadMedidaId == null && _unidadesParaIngredientes.isNotEmpty) {
             _rows = _rows.map((r) => _IngredienteRow(
               ingredienteId: r.ingredienteId,
               cantidadText: r.cantidadText,
-              unidadMedidaId: r.unidadMedidaId ?? _unidades.first.id,
+              unidadMedidaId: r.unidadMedidaId ?? _unidadesParaIngredientes.first.id,
             )).toList();
           }
         });
@@ -146,8 +184,9 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
     _imagenUrlController.dispose();
     _tiempoController.dispose();
     _porcionesController.dispose();
-    for (final e in _elaboraciones) {
-      e.dispose();
+    _herramientasController.dispose();
+    for (final b in _bloquesElaboracion) {
+      b.dispose();
     }
     super.dispose();
   }
@@ -155,7 +194,7 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
   /// Cantidad ya usada por ingrediente_id en todos los pasos de todas las elaboraciones.
   Map<int, double> _cantidadUsadaPorIngrediente() {
     final mapa = <int, double>{};
-    for (final e in _elaboraciones) {
+    for (final e in _todasElaboraciones) {
       for (final p in e.pasos) {
         for (final pi in p.ingredientes) {
           mapa[pi.ingredienteId] = (mapa[pi.ingredienteId] ?? 0) + pi.cantidad;
@@ -189,7 +228,8 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
       final total = r.cantidad;
       final usadaIng = usada[r.ingredienteId!] ?? 0;
       if (usadaIng > total) {
-        final nombre = _ingredientes.where((i) => i.id == r.ingredienteId).map((i) => i.nombre).firstOrNull ?? '—';
+        final listN = _ingredientes.where((i) => i.id == r.ingredienteId).map((i) => i.nombre).toList();
+        final nombre = listN.isEmpty ? '—' : listN.first;
         return '«$nombre»: se usan $usadaIng pero la receta tiene $total';
       }
     }
@@ -197,13 +237,19 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
   }
 
   List<Map<String, dynamic>> _buildElaboracionesPayload() {
-    return _elaboraciones.map((e) {
-      final titulo = e.tituloController.text.trim();
-      if (titulo.isEmpty) return null;
-      return {
-        'titulo': titulo,
-        'orden': _elaboraciones.indexOf(e),
-        'pasos': e.pasos.asMap().entries.map((entry) {
+    final list = <Map<String, dynamic>>[];
+    int globalOrden = 0;
+    for (int blockIdx = 0; blockIdx < _bloquesElaboracion.length; blockIdx++) {
+      final bloque = _bloquesElaboracion[blockIdx];
+      final grupoParalelo = blockIdx + 1; // 1-based para el backend
+      for (final e in bloque.elaboraciones) {
+        final titulo = e.tituloController.text.trim();
+        if (titulo.isEmpty) continue;
+        list.add({
+          'titulo': titulo,
+          'orden': globalOrden++,
+          'grupo_paralelo': grupoParalelo,
+          'pasos': e.pasos.asMap().entries.map((entry) {
           final p = entry.value;
           final desc = p.descripcionController.text.trim();
           if (desc.isEmpty) return null;
@@ -228,18 +274,26 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
                 .toList(),
           };
         }).whereType<Map<String, dynamic>>().toList(),
-      };
-    }).whereType<Map<String, dynamic>>().toList();
+        });
+      }
+    }
+    return list;
   }
 
   List<Map<String, dynamic>> _buildIngredientesPayload() {
     return _rows
         .where((r) => r.ingredienteId != null && r.cantidad > 0)
-        .map((r) => {
-              'ingrediente_id': r.ingredienteId!,
-              'cantidad': r.cantidad,
-              if (r.unidadMedidaId != null) 'unidad_medida_id': r.unidadMedidaId,
-            })
+        .map((r) {
+          final uf = _unidadesParaFila(r.ingredienteId);
+          final unidadId = uf.isNotEmpty && (r.unidadMedidaId == null || uf.any((u) => u.id == r.unidadMedidaId))
+              ? (r.unidadMedidaId ?? uf.first.id)
+              : (uf.isNotEmpty ? uf.first.id : null);
+          return {
+            'ingrediente_id': r.ingredienteId!,
+            'cantidad': r.cantidad,
+            if (unidadId != null) 'unidad_medida_id': unidadId,
+          };
+        })
         .toList();
   }
 
@@ -262,6 +316,10 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
 
     final tiempo = int.tryParse(_tiempoController.text.trim());
     final porciones = int.tryParse(_porcionesController.text.trim());
+    final herramientasText = _herramientasController.text.trim();
+    final herramientas = herramientasText.isEmpty
+        ? <String>[]
+        : herramientasText.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
     final ingredientes = _buildIngredientesPayload();
     final elaboraciones = _buildElaboracionesPayload();
 
@@ -275,6 +333,7 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
         tiempoPreparacion: tiempo,
         dificultad: _dificultad,
         porcionesBase: porciones,
+        herramientas: herramientas.isEmpty ? null : herramientas,
         ingredientes: ingredientes.isEmpty ? null : ingredientes,
         elaboraciones: elaboraciones.isEmpty ? null : elaboraciones,
       );
@@ -283,7 +342,7 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('«${recipe.titulo}» creada.'),
-          backgroundColor: Colors.green.shade700,
+          backgroundColor: AppColors.brandGreen,
         ),
       );
     } catch (e) {
@@ -311,8 +370,9 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
               ),
         ),
         const SizedBox(height: 8),
-        ...List.generate(_elaboraciones.length, (eIdx) {
-          final elab = _elaboraciones[eIdx];
+        ...List.generate(_bloquesElaboracion.length, (blockIdx) {
+          final bloque = _bloquesElaboracion[blockIdx];
+          final esGrupoParalelo = bloque.elaboraciones.length > 1;
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
             child: Padding(
@@ -320,119 +380,172 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: elab.tituloController,
-                          decoration: const InputDecoration(
-                            labelText: 'Título (ej: La Masa, El Relleno)',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          onChanged: (_) => setState(() {}),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => setState(() => _elaboraciones.removeAt(eIdx)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  ...List.generate(elab.pasos.length, (pIdx) {
-                    final paso = elab.pasos[pIdx];
-                    return Padding(
+                  if (esGrupoParalelo)
+                    Padding(
                       padding: const EdgeInsets.only(bottom: 8.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Row(
                         children: [
-                          Text('Paso ${pIdx + 1}', style: Theme.of(context).textTheme.labelLarge),
-                          const SizedBox(height: 4),
-                          TextField(
-                            controller: paso.descripcionController,
-                            decoration: const InputDecoration(
-                              labelText: 'Descripción',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            maxLines: 2,
-                            onChanged: (_) => setState(() {}),
+                          Icon(Icons.groups, size: 18, color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Grupo de elaboraciones paralelas (${bloque.elaboraciones.length})',
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
                           ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              SizedBox(
-                                width: 80,
-                                child: TextField(
-                                  controller: paso.tiempoController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Tiempo',
-                                    border: OutlineInputBorder(),
-                                    isDense: true,
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  onChanged: (_) => setState(() {}),
-                                ),
-                              ),
-                              if (_unidadesTiempo.isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                SizedBox(
-                                  width: 90,
-                                  child: DropdownButtonFormField<int>(
-                                    value: paso.tiempoUnidadMedidaId ?? _unidadesTiempo.first.id,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Unidad',
-                                      border: OutlineInputBorder(),
-                                      isDense: true,
-                                    ),
-                                    items: _unidadesTiempo
-                                        .map((u) => DropdownMenuItem<int>(
-                                              value: u.id,
-                                              child: Text(u.abreviatura ?? u.nombre),
-                                            ))
-                                        .toList(),
-                                    onChanged: (v) => setState(() => paso.tiempoUnidadMedidaId = v),
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: TextField(
-                                  controller: paso.temperaturaController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Temperatura (ej: 180°C)',
-                                    border: OutlineInputBorder(),
-                                    isDense: true,
-                                  ),
-                                  onChanged: (_) => setState(() {}),
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.remove_circle_outline, size: 20),
-                                onPressed: elab.pasos.length > 1
-                                    ? () => setState(() {
-                                          paso.dispose();
-                                          elab.pasos.removeAt(pIdx);
-                                        })
-                                    : null,
-                              ),
-                            ],
+                          const Spacer(),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 20),
+                            tooltip: 'Eliminar bloque',
+                            onPressed: () => setState(() {
+                              bloque.dispose();
+                              _bloquesElaboracion.removeAt(blockIdx);
+                            }),
                           ),
-                          if (_rows.any((r) => r.ingredienteId != null)) ...[
-                            const SizedBox(height: 4),
-                            _buildPasoIngredientes(paso, elab, pIdx),
-                          ],
                         ],
                       ),
+                    ),
+                  ...List.generate(bloque.elaboraciones.length, (eIdx) {
+                    final elab = bloque.elaboraciones[eIdx];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (esGrupoParalelo && eIdx > 0) const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: elab.tituloController,
+                                decoration: InputDecoration(
+                                  labelText: esGrupoParalelo
+                                      ? 'Elaboración ${eIdx + 1} (ej: La Masa, El Relleno)'
+                                      : 'Título (ej: La Masa, El Relleno)',
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              tooltip: bloque.elaboraciones.length > 1
+                                  ? 'Quitar esta elaboración del grupo'
+                                  : 'Eliminar elaboración',
+                              onPressed: () => setState(() {
+                                if (bloque.elaboraciones.length > 1) {
+                                  elab.dispose();
+                                  bloque.elaboraciones.removeAt(eIdx);
+                                } else {
+                                  bloque.dispose();
+                                  _bloquesElaboracion.removeAt(blockIdx);
+                                }
+                              }),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        ...List.generate(elab.pasos.length, (pIdx) {
+                          final paso = elab.pasos[pIdx];
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Paso ${pIdx + 1}', style: Theme.of(context).textTheme.labelLarge),
+                                const SizedBox(height: 4),
+                                TextField(
+                                  controller: paso.descripcionController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Descripción',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  maxLines: 2,
+                                  onChanged: (_) => setState(() {}),
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    SizedBox(
+                                      width: 80,
+                                      child: TextField(
+                                        controller: paso.tiempoController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Tiempo',
+                                          border: OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                        keyboardType: TextInputType.number,
+                                        onChanged: (_) => setState(() {}),
+                                      ),
+                                    ),
+                                    if (_unidadesTiempo.isNotEmpty) ...[
+                                      const SizedBox(width: 8),
+                                      SizedBox(
+                                        width: 90,
+                                        child: DropdownButtonFormField<int>(
+                                          value: paso.tiempoUnidadMedidaId ?? _unidadesTiempo.first.id,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Unidad',
+                                            border: OutlineInputBorder(),
+                                            isDense: true,
+                                          ),
+                                          items: _unidadesTiempo
+                                              .map((u) => DropdownMenuItem<int>(
+                                                    value: u.id,
+                                                    child: Text(u.abreviatura ?? u.nombre),
+                                                  ))
+                                              .toList(),
+                                          onChanged: (v) => setState(() => paso.tiempoUnidadMedidaId = v),
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: paso.temperaturaController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Temperatura (ej: 180°C)',
+                                          border: OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                        onChanged: (_) => setState(() {}),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.remove_circle_outline, size: 20),
+                                      onPressed: elab.pasos.length > 1
+                                          ? () => setState(() {
+                                                paso.dispose();
+                                                elab.pasos.removeAt(pIdx);
+                                              })
+                                          : null,
+                                    ),
+                                  ],
+                                ),
+                                if (_rows.any((r) => r.ingredienteId != null)) ...[
+                                  const SizedBox(height: 4),
+                                  _buildPasoIngredientes(paso, elab, pIdx),
+                                ],
+                              ],
+                            ),
+                          );
+                        }),
+                        TextButton.icon(
+                          onPressed: () {
+                            setState(() => elab.pasos.add(_PasoForm(tiempoUnidadMedidaId: _unidadesTiempo.isNotEmpty ? _unidadesTiempo.first.id : null)));
+                          },
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Añadir paso'),
+                        ),
+                      ],
                     );
                   }),
                   TextButton.icon(
-                    onPressed: () {
-                      setState(() => elab.pasos.add(_PasoForm(tiempoUnidadMedidaId: _unidadesTiempo.isNotEmpty ? _unidadesTiempo.first.id : null)));
-                    },
+                    onPressed: () => setState(() => bloque.elaboraciones.add(_ElaboracionForm())),
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Añadir paso'),
+                    label: Text(esGrupoParalelo ? 'Añadir otra en paralelo' : 'Añadir elaboraciones en paralelo'),
                   ),
                 ],
               ),
@@ -440,10 +553,22 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
           );
         }),
         const SizedBox(height: 8),
-        TextButton.icon(
-          onPressed: () => setState(() => _elaboraciones.add(_ElaboracionForm())),
-          icon: const Icon(Icons.add),
-          label: const Text('Añadir elaboración'),
+        Row(
+          children: [
+            TextButton.icon(
+              onPressed: () => setState(() => _bloquesElaboracion.add(_BloqueElaboracion([_ElaboracionForm()]))),
+              icon: const Icon(Icons.add),
+              label: const Text('Añadir elaboración'),
+            ),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              icon: const Icon(Icons.groups),
+              label: const Text('Añadir grupo paralelo'),
+              onPressed: () => setState(() {
+                _bloquesElaboracion.add(_BloqueElaboracion([_ElaboracionForm(), _ElaboracionForm()]));
+              }),
+            ),
+          ],
         ),
       ],
     );
@@ -485,12 +610,13 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
                         .toList(),
                     onChanged: (v) {
                       if (v == null) return;
-                      final row = _rows.where((r) => r.ingredienteId == v).firstOrNull;
+                      final list = _rows.where((r) => r.ingredienteId == v).toList();
+                      final row = list.isEmpty ? null : list.first;
                       if (row != null) {
                         setState(() {
                           pi.ingredienteId = v;
                           pi.cantidad = row.cantidad;
-                          pi.unidadMedidaId = row.unidadMedidaId ?? (_unidades.isNotEmpty ? _unidades.first.id : pi.unidadMedidaId);
+                          pi.unidadMedidaId = row.unidadMedidaId ?? (_unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : pi.unidadMedidaId);
                         });
                       } else {
                         setState(() => pi.ingredienteId = v);
@@ -511,11 +637,18 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: DropdownButtonFormField<int>(
-                    value: pi.unidadMedidaId,
-                    decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-                    items: _unidades.map((u) => DropdownMenuItem<int>(value: u.id, child: Text(u.abreviatura ?? u.nombre))).toList(),
-                    onChanged: (v) => setState(() => pi.unidadMedidaId = v ?? pi.unidadMedidaId),
+                  child: Builder(
+                    builder: (context) {
+                      final unidadesFila = _unidadesParaFila(pi.ingredienteId);
+                      return DropdownButtonFormField<int>(
+                        value: unidadesFila.any((u) => u.id == pi.unidadMedidaId)
+                            ? pi.unidadMedidaId
+                            : (unidadesFila.isNotEmpty ? unidadesFila.first.id : null),
+                        decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                        items: unidadesFila.map((u) => DropdownMenuItem<int>(value: u.id, child: Text(u.abreviatura ?? u.nombre))).toList(),
+                        onChanged: (v) => setState(() => pi.unidadMedidaId = v ?? pi.unidadMedidaId),
+                      );
+                    },
                   ),
                 ),
                 IconButton(
@@ -542,7 +675,7 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
             setState(() => paso.ingredientes.add(_PasoIngredienteForm(
                   ingredienteId: disp.ingredienteId!,
                   cantidad: disponible,
-                  unidadMedidaId: disp.unidadMedidaId ?? (_unidades.isNotEmpty ? _unidades.first.id : 1),
+                  unidadMedidaId: disp.unidadMedidaId ?? (_unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : 1),
                 )));
           },
           icon: const Icon(Icons.add, size: 16),
@@ -675,6 +808,17 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _herramientasController,
+                        decoration: const InputDecoration(
+                          labelText: 'Herramientas necesarias',
+                          hintText: 'Ej: sartén, batidora, horno (separadas por comas)',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
                       const SizedBox(height: 24),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -686,16 +830,37 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
                                 ),
                           ),
                           TextButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                _rows.add(_IngredienteRow(
-                                  cantidadText: '1',
-                                  unidadMedidaId: _unidades.isNotEmpty ? _unidades.first.id : null,
-                                ));
-                              });
+                            onPressed: () async {
+                              final ing = await showProponerIngredienteDialog(context);
+                              if (ing != null && mounted) {
+                                try {
+                                  final list = await RecipeService().fetchIngredientes();
+                                  if (mounted) {
+                                    setState(() {
+                                      _ingredientes = list;
+                                      _rows.add(_IngredienteRow(
+                                        ingredienteId: ing.id,
+                                        cantidadText: '1',
+                                        unidadMedidaId: _unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : null,
+                                      ));
+                                    });
+                                  }
+                                } catch (_) {
+                                  if (mounted) {
+                                    setState(() {
+                                      _ingredientes.add(ing);
+                                      _rows.add(_IngredienteRow(
+                                        ingredienteId: ing.id,
+                                        cantidadText: '1',
+                                        unidadMedidaId: _unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : null,
+                                      ));
+                                    });
+                                  }
+                                }
+                              }
                             },
-                            icon: const Icon(Icons.add),
-                            label: const Text('Añadir'),
+                            icon: const Icon(Icons.lightbulb_outline),
+                            label: const Text('Proponer uno nuevo'),
                           ),
                         ],
                       ),
@@ -709,23 +874,21 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
                             children: [
                               Expanded(
                                 flex: 2,
-                                child: DropdownButtonFormField<int>(
+                                child: IngredienteSelector(
+                                  ingredientes: _ingredientes,
                                   value: row.ingredienteId,
+                                  onChanged: (v) => setState(() {
+                                    row.ingredienteId = v;
+                                    final uf = _unidadesParaFila(v);
+                                    if (uf.isNotEmpty && (row.unidadMedidaId == null || !uf.any((u) => u.id == row.unidadMedidaId))) {
+                                      row.unidadMedidaId = uf.first.id;
+                                    }
+                                  }),
                                   decoration: const InputDecoration(
                                     labelText: 'Ingrediente',
                                     border: OutlineInputBorder(),
                                     isDense: true,
                                   ),
-                                  items: _ingredientes
-                                      .map((i) => DropdownMenuItem<int>(
-                                            value: i.id,
-                                            child: Text(
-                                              i.nombre,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ))
-                                      .toList(),
-                                  onChanged: (v) => setState(() => row.ingredienteId = v),
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -744,23 +907,30 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
                               ),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: DropdownButtonFormField<int>(
-                                  value: row.unidadMedidaId ?? (_unidades.isNotEmpty ? _unidades.first.id : null),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Unidad',
-                                    border: OutlineInputBorder(),
-                                    isDense: true,
-                                  ),
-                                  items: _unidades
-                                      .map((u) => DropdownMenuItem<int>(
-                                            value: u.id,
-                                            child: Text(
-                                              u.abreviatura ?? u.nombre,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ))
-                                      .toList(),
-                                  onChanged: _unidades.isEmpty ? null : (v) => setState(() => row.unidadMedidaId = v),
+                                child: Builder(
+                                  builder: (context) {
+                                    final unidadesFila = _unidadesParaFila(row.ingredienteId);
+                                    return DropdownButtonFormField<int>(
+                                      value: unidadesFila.any((u) => u.id == row.unidadMedidaId)
+                                          ? row.unidadMedidaId
+                                          : (unidadesFila.isNotEmpty ? unidadesFila.first.id : null),
+                                      decoration: const InputDecoration(
+                                        labelText: 'Unidad',
+                                        border: OutlineInputBorder(),
+                                        isDense: true,
+                                      ),
+                                      items: unidadesFila
+                                          .map((u) => DropdownMenuItem<int>(
+                                                value: u.id,
+                                                child: Text(
+                                                  u.abreviatura ?? u.nombre,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ))
+                                          .toList(),
+                                      onChanged: unidadesFila.isEmpty ? null : (v) => setState(() => row.unidadMedidaId = v),
+                                    );
+                                  },
                                 ),
                               ),
                               IconButton(
@@ -773,6 +943,21 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
                           ),
                         );
                       }),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _rows.add(_IngredienteRow(
+                                cantidadText: '1',
+                                unidadMedidaId: _unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : null,
+                              ));
+                            });
+                          },
+                          icon: const Icon(Icons.add),
+                          label: const Text('Añadir'),
+                        ),
+                      ),
                       const SizedBox(height: 24),
                       _buildElaboracionesSection(),
                       const SizedBox(height: 24),

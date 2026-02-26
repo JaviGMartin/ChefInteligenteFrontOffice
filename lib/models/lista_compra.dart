@@ -54,6 +54,8 @@ class ListaCompraItem {
   final double cantidadCompra;
   final int? unidadMedidaId;
   final UnidadMedidaRef? unidadMedida;
+  /// Formato del catálogo (pack, bric, etc.) cuando el ítem tiene producto_proveedor.
+  final String? formato;
   final bool completado;
   final String estado;
   final int? contenedorId;
@@ -68,6 +70,7 @@ class ListaCompraItem {
     required this.cantidadCompra,
     this.unidadMedidaId,
     this.unidadMedida,
+    this.formato,
     required this.completado,
     required this.estado,
     this.contenedorId,
@@ -88,6 +91,7 @@ class ListaCompraItem {
       unidadMedida: json['unidad_medida'] is Map<String, dynamic>
           ? UnidadMedidaRef.fromJson(json['unidad_medida'] as Map<String, dynamic>)
           : null,
+      formato: json['formato'] as String?,
       completado: json['completado'] == true,
       estado: (json['estado'] as String?) ?? 'pendiente',
       contenedorId: _toIntNullable(json['contenedor_id']),
@@ -95,6 +99,16 @@ class ListaCompraItem {
           ? ContenedorRef.fromJson(json['contenedor'] as Map<String, dynamic>)
           : null,
     );
+  }
+
+  /// Texto corto para cantidad + empaquetado (ej. "2 pack", "1 bric").
+  String get cantidadYEmpaquetado {
+    final emp = (formato?.trim().isNotEmpty == true)
+        ? formato!
+        : (unidadMedida?.abreviatura ?? unidadMedida?.nombre ?? 'ud.');
+    final c = cantidad;
+    final cantStr = c == c.roundToDouble() ? c.toInt().toString() : c.toString();
+    return '$cantStr $emp'.trim();
   }
 }
 

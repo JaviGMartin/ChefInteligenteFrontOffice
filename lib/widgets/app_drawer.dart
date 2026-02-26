@@ -15,7 +15,9 @@ import '../screens/profile/user_profile_screen.dart';
 import '../screens/shopping_lists_screen.dart';
 import '../screens/recipe_list_screen.dart';
 import '../screens/kitchen_funnel_screen.dart';
+import '../screens/support_screen.dart';
 import '../screens/team_management_screen.dart';
+import '../theme/app_colors.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 class AppDrawer extends StatefulWidget {
@@ -178,7 +180,6 @@ class _AppDrawerState extends State<AppDrawer> {
               final role = user?.role?.toLowerCase();
               final initial = name.isNotEmpty ? name.trim().toUpperCase()[0] : '?';
               final badge = _subscriptionBadge(role);
-              const verdeBetis = Color(0xFF00914E);
               // Cabecera compacta: avatar + nombre + email + badge (sin línea redundante de hogar)
               const headerHeight = 100.0;
               return Container(
@@ -189,8 +190,8 @@ class _AppDrawerState extends State<AppDrawer> {
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      verdeBetis,
-                      verdeBetis,
+                      AppColors.brandBlue,
+                      AppColors.brandBlue,
                       Colors.black.withOpacity(0.75),
                     ],
                     stops: const [0.0, 0.35, 1.0],
@@ -254,8 +255,8 @@ class _AppDrawerState extends State<AppDrawer> {
                                     ? null
                                     : Text(
                                         initial,
-                                        style: TextStyle(
-                                          color: verdeBetis,
+                                        style: const TextStyle(
+                                          color: AppColors.brandBlue,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 28,
                                         ),
@@ -338,11 +339,11 @@ class _AppDrawerState extends State<AppDrawer> {
                                       SizedBox(
                                         width: 20,
                                         height: 20,
-                                        child: h.esPrincipal
+                                        child:                                         h.esPrincipal
                                             ? Icon(
                                                 Icons.star,
                                                 size: 16,
-                                                color: Colors.amber.shade700,
+                                                color: AppColors.brandGreen,
                                               )
                                             : const SizedBox.shrink(),
                                       ),
@@ -467,12 +468,12 @@ class _AppDrawerState extends State<AppDrawer> {
             },
           ),
           ListTile(
-            leading: Icon(LucideIcons.shoppingCart, color: primary),
-            title: Text('Embudo de compra', style: TextStyle(color: primary)),
+            leading: Icon(LucideIcons.messageCircle, color: primary),
+            title: Text('Ayuda y soporte', style: TextStyle(color: primary)),
             onTap: () {
               Navigator.of(context).pop();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const PurchaseFunnelScreen()),
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SupportScreen()),
               );
             },
           ),
@@ -493,13 +494,13 @@ class _AppDrawerState extends State<AppDrawer> {
         return const _Badge(
           label: 'Miembro Gold',
           icon: Icons.workspace_premium,
-          color: Color(0xFFFFD54F),
+          color: AppColors.brandWhite,
         );
       case 'premium':
         return const _Badge(
           label: 'Miembro Premium',
           icon: Icons.star,
-          color: Color(0xFF64B5F6),
+          color: AppColors.brandWhite,
         );
       case 'free':
       case 'gratis':

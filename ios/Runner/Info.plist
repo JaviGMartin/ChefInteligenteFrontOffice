@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>La cámara se usa para escanear códigos de barras de productos en la lista de la compra.</string>
 </dict>
 </plist>

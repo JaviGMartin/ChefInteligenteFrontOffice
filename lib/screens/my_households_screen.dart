@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/hogar.dart';
+import '../theme/app_colors.dart';
 import '../services/hogar_service.dart';
 import '../widgets/main_layout.dart';
 import 'home_setup_screen.dart';
@@ -68,7 +69,6 @@ class _MyHouseholdsScreenState extends State<MyHouseholdsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const betisColor = Color(0xFF00914E);
     return MainLayout(
       title: 'Mis Hogares',
       child: FutureBuilder<HogaresResult>(
@@ -133,17 +133,17 @@ class _MyHouseholdsScreenState extends State<MyHouseholdsScreen> {
                       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         border: Border.all(
-                          color: isActive ? betisColor : Colors.transparent,
+                          color: isActive ? AppColors.brandGreen : Colors.transparent,
                           width: 2,
                         ),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: ListTile(
-                        leading: Icon(Icons.home, color: isActive ? betisColor : null),
+                        leading: Icon(Icons.home, color: isActive ? AppColors.brandGreen : null),
                         title: Text(hogar.nombre),
                         subtitle: hogar.esPrincipal ? const Text('Principal') : null,
                         trailing: isActive
-                            ? const Icon(Icons.check_circle, color: betisColor)
+                            ? const Icon(Icons.check_circle, color: AppColors.brandGreen)
                             : null,
                         onTap: _isSubmitting ? null : () => _setActive(hogar.id),
                       ),

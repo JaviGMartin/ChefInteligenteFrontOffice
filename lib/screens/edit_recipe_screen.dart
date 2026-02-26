@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../models/recipe.dart';
+import '../theme/app_colors.dart';
 import '../services/recipe_service.dart';
 import '../services/stock_service.dart';
+import '../widgets/ingrediente_selector.dart';
 import '../widgets/main_layout.dart';
+import '../widgets/proponer_ingrediente_dialog.dart';
 import '../widgets/recipe_form_models.dart';
 import '../widgets/recipe_status_badge.dart';
 
@@ -25,6 +28,7 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
   late final TextEditingController _imagenUrlController;
   late final TextEditingController _tiempoController;
   late final TextEditingController _porcionesController;
+  late final TextEditingController _herramientasController;
   String? _dificultad;
   bool _saving = false;
   bool _loading = true;
@@ -34,6 +38,19 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
   List<UnidadMedida> _unidades = [];
   List<UnidadMedida> get _unidadesTiempo =>
       _unidades.where((u) => u.tipo == 'tiempo').toList();
+  /// Unidades para cantidad de ingredientes (excluye tiempo: h, min, s).
+  List<UnidadMedida> get _unidadesParaIngredientes =>
+      _unidades.where((u) => u.tipo != 'tiempo').toList();
+
+  /// Unidades a mostrar para la fila según el ingrediente seleccionado.
+  List<UnidadMedida> _unidadesParaFila(int? ingredienteId) {
+    if (ingredienteId == null) return _unidadesParaIngredientes;
+    final ing = _ingredientes.where((i) => i.id == ingredienteId).firstOrNull;
+    if (ing == null || ing.tiposUnidad == null || ing.tiposUnidad!.isEmpty) {
+      return _unidadesParaIngredientes;
+    }
+    return _unidades.where((u) => (u.tipo != null) && ing.tiposUnidad!.contains(u.tipo!)).toList();
+  }
   List<IngredienteRowForm> _rows = [];
   List<ElaboracionForm> _elaboraciones = [];
 
@@ -55,6 +72,9 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
     );
     _porcionesController = TextEditingController(
       text: widget.recipe.porcionesBase?.toString() ?? '',
+    );
+    _herramientasController = TextEditingController(
+      text: widget.recipe.herramientas?.join(', ') ?? '',
     );
     _dificultad = widget.recipe.dificultad;
     _loadFullData();
@@ -78,13 +98,14 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
       _instruccionesController.text = full.instrucciones ?? '';
       _imagenUrlController.text = full.imagenUrl ?? '';
       _porcionesController.text = full.porcionesBase?.toString() ?? '';
+      _herramientasController.text = full.herramientas?.join(', ') ?? '';
       _dificultad = full.dificultad;
       _rows = full.ingredientes.map((ing) => IngredienteRowForm(
         ingredienteId: ing.id,
         cantidadText: (ing.cantidad ?? 0).toString(),
-        unidadMedidaId: ing.unidadMedidaId ?? (_unidades.isNotEmpty ? _unidades.first.id : null),
+        unidadMedidaId: ing.unidadMedidaId ?? (_unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : null),
       )).toList();
-      if (_rows.isEmpty) _rows.add(IngredienteRowForm(unidadMedidaId: _unidades.isNotEmpty ? _unidades.first.id : null));
+      if (_rows.isEmpty) _rows.add(IngredienteRowForm(unidadMedidaId: _unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : null));
       _elaboraciones = (full.elaboraciones ?? []).map((e) {
         final defaultSegundos = _unidadesTiempo.where((u) => u.factorConversion == 1.0).firstOrNull;
         final pasos = e.pasos.map((p) {
@@ -103,7 +124,7 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
             ingredientes: p.ingredientes.map((pi) => PasoIngredienteForm(
               ingredienteId: pi.id,
               cantidad: pi.cantidad ?? 0,
-              unidadMedidaId: pi.unidadMedidaId ?? (_unidades.isNotEmpty ? _unidades.first.id : 1),
+              unidadMedidaId: pi.unidadMedidaId ?? (_unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : 1),
             )).toList(),
             tiempoUnidadMedidaId: umId,
           );
@@ -130,6 +151,7 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
     _imagenUrlController.dispose();
     _tiempoController.dispose();
     _porcionesController.dispose();
+    _herramientasController.dispose();
     for (final e in _elaboraciones) e.dispose();
     super.dispose();
   }
@@ -181,10 +203,16 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
   List<Map<String, dynamic>> _buildIngredientesPayload() {
     return _rows
         .where((r) => r.ingredienteId != null && r.cantidad > 0)
-        .map((r) => {
-          'ingrediente_id': r.ingredienteId,
-          'cantidad': r.cantidad,
-          'unidad_medida_id': r.unidadMedidaId ?? (_unidades.isNotEmpty ? _unidades.first.id : 1),
+        .map((r) {
+          final uf = _unidadesParaFila(r.ingredienteId);
+          final unidadId = uf.isNotEmpty && (r.unidadMedidaId == null || uf.any((u) => u.id == r.unidadMedidaId))
+              ? (r.unidadMedidaId ?? uf.first.id)
+              : (uf.isNotEmpty ? uf.first.id : _unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : 1);
+          return {
+            'ingrediente_id': r.ingredienteId,
+            'cantidad': r.cantidad,
+            'unidad_medida_id': unidadId,
+          };
         })
         .toList();
   }
@@ -239,6 +267,10 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
     final porciones = int.tryParse(_porcionesController.text.trim());
     setState(() => _saving = true);
     try {
+      final herramientasText = _herramientasController.text.trim();
+      final herramientas = herramientasText.isEmpty
+          ? <String>[]
+          : herramientasText.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
       final updated = await RecipeService().updateRecipe(
         recipeId: widget.recipe.id,
         titulo: titulo,
@@ -248,6 +280,7 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
         tiempoPreparacion: tiempo,
         dificultad: _dificultad,
         porcionesBase: porciones,
+        herramientas: herramientas.isEmpty ? null : herramientas,
         ingredientes: _buildIngredientesPayload(),
         elaboraciones: _buildElaboracionesPayload(),
       );
@@ -260,7 +293,7 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                 ? 'Solicitud de corrección enviada. Un administrador la revisará. No se añadirán puntos adicionales.'
                 : '«$titulo» actualizada.',
           ),
-          backgroundColor: Colors.green.shade700,
+          backgroundColor: AppColors.brandGreen,
         ),
       );
     } catch (e) {
@@ -474,7 +507,7 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                         setState(() {
                           pi.ingredienteId = v;
                           pi.cantidad = row.cantidad;
-                          pi.unidadMedidaId = row.unidadMedidaId ?? (_unidades.isNotEmpty ? _unidades.first.id : pi.unidadMedidaId);
+                          pi.unidadMedidaId = row.unidadMedidaId ?? (_unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : pi.unidadMedidaId);
                         });
                       } else {
                         setState(() => pi.ingredienteId = v);
@@ -497,11 +530,14 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: DropdownButtonFormField<int>(
-                    value: _unidades.any((u) => u.id == pi.unidadMedidaId)
-                        ? pi.unidadMedidaId
-                        : (_unidades.isNotEmpty ? _unidades.first.id : null),
+                    value: () {
+                      final uf = _unidadesParaFila(pi.ingredienteId);
+                      return uf.any((u) => u.id == pi.unidadMedidaId)
+                          ? pi.unidadMedidaId
+                          : (uf.isNotEmpty ? uf.first.id : null);
+                    }(),
                     decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-                    items: _unidades.map((u) => DropdownMenuItem<int>(value: u.id, child: Text(u.abreviatura ?? u.nombre))).toList(),
+                    items: _unidadesParaFila(pi.ingredienteId).map((u) => DropdownMenuItem<int>(value: u.id, child: Text(u.abreviatura ?? u.nombre))).toList(),
                     onChanged: _isLocked ? null : (v) => setState(() => pi.unidadMedidaId = v ?? pi.unidadMedidaId),
                   ),
                 ),
@@ -529,7 +565,7 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
             setState(() => paso.ingredientes.add(PasoIngredienteForm(
                   ingredienteId: disp.ingredienteId!,
                   cantidad: disponible,
-                  unidadMedidaId: disp.unidadMedidaId ?? (_unidades.isNotEmpty ? _unidades.first.id : 1),
+                  unidadMedidaId: disp.unidadMedidaId ?? (_unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : 1),
                 )));
           },
           icon: const Icon(Icons.add, size: 16),
@@ -695,6 +731,18 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                               onChanged: _isLocked ? null : (v) => setState(() => _dificultad = v),
                             ),
                           ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _herramientasController,
+                            readOnly: _isLocked,
+                            decoration: const InputDecoration(
+                              labelText: 'Herramientas necesarias',
+                              hintText: 'Ej: sartén, batidora, horno (separadas por comas)',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            onChanged: (_) => setState(() {}),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 24),
@@ -708,12 +756,39 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                                 ),
                           ),
                           TextButton.icon(
-                            onPressed: _isLocked ? null : () => setState(() => _rows.add(IngredienteRowForm(
-                                  cantidadText: '1',
-                                  unidadMedidaId: _unidades.isNotEmpty ? _unidades.first.id : null,
-                                ))),
-                            icon: const Icon(Icons.add),
-                            label: const Text('Añadir'),
+                            onPressed: _isLocked
+                                ? null
+                                : () async {
+                                    final ing = await showProponerIngredienteDialog(context);
+                                    if (ing != null && mounted) {
+                                      try {
+                                        final list = await RecipeService().fetchIngredientes();
+                                        if (mounted) {
+                                          setState(() {
+                                            _ingredientes = list;
+                                            _rows.add(IngredienteRowForm(
+                                              ingredienteId: ing.id,
+                                              cantidadText: '1',
+unidadMedidaId: _unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : null,
+                                              ));
+                                            });
+                                          }
+                                        } catch (_) {
+                                          if (mounted) {
+                                            setState(() {
+                                              _ingredientes.add(ing);
+                                              _rows.add(IngredienteRowForm(
+                                                ingredienteId: ing.id,
+                                                cantidadText: '1',
+                                                unidadMedidaId: _unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : null,
+                                            ));
+                                          });
+                                        }
+                                      }
+                                    }
+                                  },
+                            icon: const Icon(Icons.lightbulb_outline),
+                            label: const Text('Proponer uno nuevo'),
                           ),
                         ],
                       ),
@@ -727,25 +802,24 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                             children: [
                               Expanded(
                                 flex: 2,
-                                child: DropdownButtonFormField<int>(
+                                child: IngredienteSelector(
+                                  ingredientes: _ingredientes,
                                   value: _ingredientes.any((i) => i.id == row.ingredienteId)
                                       ? row.ingredienteId
                                       : (_ingredientes.isNotEmpty ? _ingredientes.first.id : null),
+                                  onChanged: (v) => setState(() {
+                                    row.ingredienteId = v;
+                                    final uf = _unidadesParaFila(v);
+                                    if (uf.isNotEmpty && (row.unidadMedidaId == null || !uf.any((u) => u.id == row.unidadMedidaId))) {
+                                      row.unidadMedidaId = uf.first.id;
+                                    }
+                                  }),
+                                  enabled: !_isLocked,
                                   decoration: const InputDecoration(
                                     labelText: 'Ingrediente',
                                     border: OutlineInputBorder(),
                                     isDense: true,
                                   ),
-                                  items: _ingredientes
-                                      .map((i) => DropdownMenuItem<int>(
-                                            value: i.id,
-                                            child: Text(
-                                              i.nombre,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ))
-                                      .toList(),
-                                  onChanged: _isLocked ? null : (v) => setState(() => row.ingredienteId = v),
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -766,15 +840,18 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: DropdownButtonFormField<int>(
-                                  value: _unidades.any((u) => u.id == row.unidadMedidaId)
-                                      ? row.unidadMedidaId
-                                      : (_unidades.isNotEmpty ? _unidades.first.id : null),
+                                  value: () {
+                                    final uf = _unidadesParaFila(row.ingredienteId);
+                                    return uf.any((u) => u.id == row.unidadMedidaId)
+                                        ? row.unidadMedidaId
+                                        : (uf.isNotEmpty ? uf.first.id : null);
+                                  }(),
                                   decoration: const InputDecoration(
                                     labelText: 'Unidad',
                                     border: OutlineInputBorder(),
                                     isDense: true,
                                   ),
-                                  items: _unidades
+                                  items: _unidadesParaFila(row.ingredienteId)
                                       .map((u) => DropdownMenuItem<int>(
                                             value: u.id,
                                             child: Text(
@@ -783,7 +860,7 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                                             ),
                                           ))
                                       .toList(),
-                                  onChanged: _isLocked || _unidades.isEmpty ? null : (v) => setState(() => row.unidadMedidaId = v),
+                                  onChanged: _isLocked || _unidadesParaFila(row.ingredienteId).isEmpty ? null : (v) => setState(() => row.unidadMedidaId = v),
                                 ),
                               ),
                               IconButton(
@@ -796,6 +873,17 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                           ),
                         );
                       }),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _isLocked ? null : () => setState(() => _rows.add(IngredienteRowForm(
+                                cantidadText: '1',
+                                unidadMedidaId: _unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : null,
+                              ))),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Añadir'),
+                        ),
+                      ),
                       const SizedBox(height: 24),
                       _buildElaboracionesSection(),
                       const SizedBox(height: 24),
@@ -828,19 +916,19 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16.0),
       child: Material(
-        color: Colors.amber.shade50,
+        color: AppColors.brandGreen.withOpacity(0.15),
         borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             children: [
-              Icon(Icons.info_outline, color: Colors.amber.shade800, size: 24),
+              Icon(Icons.info_outline, color: AppColors.brandBlue, size: 24),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   'Esta receta está en revisión y no puede ser modificada.',
                   style: TextStyle(
-                    color: Colors.amber.shade900,
+                    color: AppColors.brandBlue,
                     fontWeight: FontWeight.w600,
                     fontSize: 14,
                   ),

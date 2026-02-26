@@ -5,7 +5,10 @@ import '../models/family_data.dart';
 import '../models/hogar_equipo.dart';
 import '../screens/member_profile_screen.dart';
 import '../services/hogar_service.dart';
+import '../theme/app_colors.dart';
 import '../widgets/main_layout.dart';
+
+const Color _accent = AppColors.brandGreen;
 
 class FamilyManagementScreen extends StatefulWidget {
   const FamilyManagementScreen({super.key});
@@ -358,5 +361,3 @@ class _MemberCard extends StatelessWidget {
     );
   }
 }
-
-const Color _accent = Color(0xFF00914E);

@@ -196,6 +196,97 @@ class ShoppingService {
     }
   }
 
+  /// Vuelve la lista a "listas activas" (quita pendiente de procesar). Útil cuando hay artículos pendientes.
+  Future<void> reactivarLista(int listaId) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    final uri = Uri.parse('$_baseUrl/shopping/listas/$listaId/reactivar');
+    final response = await http.patch(uri, headers: _authHeaders(token));
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+  }
+
+  /// Busca el ítem pendiente de la lista que coincide con el EAN (sin marcarlo).
+  /// Busca un ítem de la lista por EAN (cualquier estado). Lanza si no hay ninguno (404) o hay otro error.
+  Future<ListaCompraItem> buscarItemPorEan(int listaId, String ean) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    final uri = Uri.parse('$_baseUrl/shopping/listas/$listaId/buscar-item-por-ean');
+    final normalized = ean.trim().replaceAll(RegExp(r'\s+'), '');
+    if (normalized.isEmpty) {
+      throw Exception('El código EAN no puede estar vacío.');
+    }
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(token),
+      body: jsonEncode({'ean': normalized}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = decoded['data'] as Map<String, dynamic>;
+    return ListaCompraItem.fromJson(data);
+  }
+
+  /// Marca como "en el carrito" el primer ítem pendiente de la lista cuyo producto coincida con el EAN.
+  /// Lanza si el código no corresponde a ningún producto pendiente (404) o hay otro error.
+  Future<void> marcarPorEan(int listaId, String ean) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    final uri = Uri.parse('$_baseUrl/shopping/listas/$listaId/marcar-por-ean');
+    final normalized = ean.trim().replaceAll(RegExp(r'\s+'), '');
+    if (normalized.isEmpty) {
+      throw Exception('El código EAN no puede estar vacío.');
+    }
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(token),
+      body: jsonEncode({'ean': normalized}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+  }
+
+  /// Busca un producto en el catálogo por EAN (no en la lista).
+  /// Devuelve id, nombre y opcionalmente productoProveedorId cuando el EAN
+  /// coincide con una entrada del catálogo de proveedores (para preseleccionar formato).
+  Future<({int id, String nombre, int? productoProveedorId})> buscarProductoPorEan(String ean) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    final uri = Uri.parse('$_baseUrl/shopping/buscar-producto-por-ean');
+    final normalized = ean.trim().replaceAll(RegExp(r'\s+'), '');
+    if (normalized.isEmpty) {
+      throw Exception('El código EAN no puede estar vacío.');
+    }
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(token),
+      body: jsonEncode({'ean': normalized}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = decoded['data'] as Map<String, dynamic>;
+    final ppId = data['producto_proveedor_id'];
+    return (
+      id: data['id'] as int,
+      nombre: data['nombre'] as String,
+      productoProveedorId: ppId is int ? ppId : (ppId is num ? ppId.toInt() : null),
+    );
+  }
+
   /// Crea una nueva lista de compra para el hogar activo.
   Future<ListaCompraCabecera> crearLista(String titulo, {String? fechaPrevista}) async {
     final token = await _getToken();
@@ -225,6 +316,8 @@ class ShoppingService {
     int itemId, {
     bool? completado,
     String? estado,
+    double? cantidad,
+    int? unidadMedidaId,
   }) async {
     final token = await _getToken();
     if (token == null || token.isEmpty) {
@@ -233,8 +326,10 @@ class ShoppingService {
     final body = <String, dynamic>{};
     if (estado != null) body['estado'] = estado;
     if (completado != null) body['completado'] = completado;
+    if (cantidad != null) body['cantidad'] = cantidad;
+    if (unidadMedidaId != null) body['unidad_medida_id'] = unidadMedidaId;
     if (body.isEmpty) {
-      throw Exception('Indica completado o estado.');
+      throw Exception('Indica completado, estado, cantidad o unidad_medida_id.');
     }
     final uri = Uri.parse('$_baseUrl/shopping/listas/items/$itemId');
     final response = await http.patch(
@@ -301,13 +396,18 @@ class ShoppingService {
     );
   }
 
-  /// Obtiene todos los productos (para selector al añadir ítem a lista).
-  Future<List<ProductoSimple>> getProductos() async {
+  /// Obtiene productos para selector (Crear ítem). Con [q] busca por nombre/marca; [page] para paginación.
+  Future<List<ProductoSimple>> getProductos({String? q, int perPage = 100, int page = 1}) async {
     final token = await _getToken();
     if (token == null || token.isEmpty) {
       throw Exception('Sesión no iniciada.');
     }
-    final uri = Uri.parse('$_baseUrl/productos');
+    final queryParams = <String, String>{
+      if (perPage > 0) 'per_page': perPage.toString(),
+      if (page > 1) 'page': page.toString(),
+      if (q != null && q.trim().isNotEmpty) 'q': q.trim(),
+    };
+    final uri = Uri.parse('$_baseUrl/productos').replace(queryParameters: queryParams);
     final response = await http.get(uri, headers: _authHeaders(token));
     if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));

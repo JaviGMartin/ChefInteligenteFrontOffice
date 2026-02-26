@@ -148,6 +148,7 @@ class RecipeService {
     int? tiempoPreparacion,
     String? dificultad,
     int? porcionesBase,
+    List<String>? herramientas,
     List<Map<String, dynamic>>? ingredientes,
     List<Map<String, dynamic>>? elaboraciones,
   }) async {
@@ -164,6 +165,7 @@ class RecipeService {
       if (tiempoPreparacion != null) 'tiempo_preparacion': tiempoPreparacion,
       if (dificultad != null && dificultad.isNotEmpty) 'dificultad': dificultad,
       if (porcionesBase != null) 'porciones_base': porcionesBase,
+      if (herramientas != null && herramientas.isNotEmpty) 'herramientas': herramientas,
       if (ingredientes != null && ingredientes.isNotEmpty) 'ingredientes': ingredientes,
       if (elaboraciones != null && elaboraciones.isNotEmpty) 'elaboraciones': elaboraciones,
     };
@@ -278,6 +280,7 @@ class RecipeService {
     int? tiempoPreparacion,
     String? dificultad,
     int? porcionesBase,
+    List<String>? herramientas,
     List<Map<String, dynamic>>? ingredientes,
     List<Map<String, dynamic>>? elaboraciones,
   }) async {
@@ -294,6 +297,7 @@ class RecipeService {
       if (tiempoPreparacion != null) 'tiempo_preparacion': tiempoPreparacion is int ? tiempoPreparacion : (tiempoPreparacion.round()),
       'dificultad': (dificultad != null && dificultad.isNotEmpty) ? dificultad : null,
       if (porcionesBase != null) 'porciones_base': porcionesBase,
+      if (herramientas != null) 'herramientas': herramientas,
     };
     if (ingredientes != null && ingredientes.isNotEmpty) {
       body['ingredientes'] = ingredientes.map((e) {

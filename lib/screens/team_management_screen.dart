@@ -8,6 +8,7 @@ import '../models/intolerancia.dart';
 import '../screens/households_management_screen.dart';
 import '../screens/member_profile_screen.dart';
 import '../services/hogar_service.dart';
+import '../theme/app_colors.dart';
 import '../widgets/main_layout.dart';
 
 class TeamManagementScreen extends StatefulWidget {
@@ -118,7 +119,7 @@ class _TeamManagementScreenState extends State<TeamManagementScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Te has unido al hogar. Ya está activo.'),
-          backgroundColor: Color(0xFF00914E),
+          backgroundColor: AppColors.brandGreen,
         ),
       );
       await _refresh();
@@ -640,7 +641,7 @@ class _TeamManagementScreenState extends State<TeamManagementScreen> {
                     return CheckboxListTile(
                       value: isSelected,
                       title: Text(item.nombre),
-                      activeColor: const Color(0xFF00914E),
+                      activeColor: AppColors.brandGreen,
                       onChanged: (value) {
                         setState(() {
                           if (value == true) {
@@ -730,7 +731,7 @@ class _TeamManagementScreenState extends State<TeamManagementScreen> {
     );
   }
 
-  static const Color _accent = Color(0xFF00914E);
+  static const Color _accent = AppColors.brandGreen;
   static const Color _ownerGold = Color(0xFFD4AF37);
   static const List<Color> _intoleranceChipColors = [
     Color(0xFFFF8A65), // deepOrange 300
@@ -1222,7 +1223,7 @@ class _TeamManagementScreenState extends State<TeamManagementScreen> {
                         : 'Miembros: $count',
                     style: TextStyle(
                       fontSize: 14,
-                      color: atLimit ? Colors.orange.shade800 : Colors.black87,
+                      color: atLimit ? AppColors.brandGreen.withOpacity(0.9) : Colors.black87,
                       fontWeight: atLimit ? FontWeight.w600 : FontWeight.normal,
                     ),
                   ),
@@ -1234,9 +1235,9 @@ class _TeamManagementScreenState extends State<TeamManagementScreen> {
                         child: LinearProgressIndicator(
                           value: maxCount! > 0 ? count / maxCount : 0,
                           minHeight: 6,
-                          backgroundColor: Colors.grey.shade200,
+                          backgroundColor: AppColors.stainlessLight,
                           valueColor: AlwaysStoppedAnimation<Color>(
-                            atLimit ? Colors.orange : _accent,
+                            atLimit ? AppColors.brandGreen.withOpacity(0.7) : _accent,
                           ),
                         ),
                       ),

@@ -6,6 +6,7 @@ import '../services/auth_service.dart';
 import '../services/hogar_service.dart';
 import '../services/recipe_service.dart';
 import '../state/kitchen_state.dart';
+import '../theme/app_colors.dart';
 import '../widgets/main_layout.dart';
 import '../widgets/recipe_semaforo.dart';
 import '../widgets/recipe_status_badge.dart';
@@ -102,6 +103,8 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
       title: 'Recetas',
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _crearReceta(context),
+        backgroundColor: AppColors.brandBlue,
+        foregroundColor: AppColors.brandWhite,
         icon: const Icon(Icons.add),
         label: const Text('Nueva receta'),
       ),
@@ -115,7 +118,7 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: ActionChip(
-                  avatar: Icon(Icons.restaurant_menu, size: 18, color: Theme.of(context).colorScheme.primary),
+                  avatar: Icon(Icons.restaurant_menu, size: 18, color: AppColors.brandGreen),
                   label: const Text('Ver Planificador'),
                   onPressed: () {
                     Navigator.of(context).push(
@@ -129,6 +132,7 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
               TabBar(
                 controller: _tabController,
                 labelColor: Theme.of(context).colorScheme.primary,
+                indicatorColor: AppColors.brandGreen,
                 tabs: const [
                   Tab(text: 'Mis Recetas'),
                   Tab(text: 'Comunidad'),
@@ -169,7 +173,9 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
                   future: _recipesFuture,
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
+                      return const Center(
+                        child: CircularProgressIndicator(color: AppColors.brandGreen),
+                      );
                     }
                     if (snapshot.hasError) {
                       return Center(

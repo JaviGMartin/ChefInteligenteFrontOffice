@@ -6,6 +6,7 @@ import '../models/recipe.dart';
 import '../services/auth_service.dart';
 import '../services/recipe_service.dart';
 import '../state/kitchen_state.dart';
+import '../theme/app_colors.dart';
 import '../widgets/main_layout.dart';
 import '../widgets/recipe_semaforo.dart';
 import '../widgets/recipe_status_badge.dart';
@@ -52,7 +53,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('No se pudieron cargar los ingredientes: ${e.toString().replaceFirst('Exception: ', '')}'),
-            backgroundColor: Colors.orange,
+            backgroundColor: AppColors.brandGreen.withOpacity(0.7),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -105,7 +106,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Receta vuelta a borrador. Puedes editarla y volver a solicitar publicación.'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.brandGreen,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -131,7 +132,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Receta enviada a revisión. Recibirás notificación cuando se evalúe.'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.brandGreen,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -160,7 +161,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
             content: const Text(
               'Añadida al planificador. En Cocina puedes enviar los ingredientes faltantes al embudo.',
             ),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.brandGreen,
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 4),
             action: SnackBarAction(
@@ -199,7 +200,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
             content: const Text(
               'Ingredientes añadidos al embudo. La receta queda en tu lista de decisión.',
             ),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.brandGreen,
             behavior: SnackBarBehavior.floating,
             action: SnackBarAction(
               label: 'Ver Planificador',
@@ -224,7 +225,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(msg),
-            backgroundColor: esTodosIngredientes ? Colors.green : Colors.red,
+            backgroundColor: esTodosIngredientes ? AppColors.brandGreen : Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -264,7 +265,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('«${_recipe.titulo}» borrada.'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.brandGreen,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -386,6 +387,32 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                       Chip(
                         label: Text('${recipe.porcionesBase} porciones'),
                       ),
+                  ],
+                ),
+              ),
+            if (recipe.herramientas != null && recipe.herramientas!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Herramientas necesarias',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: recipe.herramientas!
+                          .map((h) => Chip(
+                                avatar: const Icon(Icons.restaurant_rounded, size: 18, color: Colors.white70),
+                                label: Text(h),
+                              ))
+                          .toList(),
+                    ),
                   ],
                 ),
               ),

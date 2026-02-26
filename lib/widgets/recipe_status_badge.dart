@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
+
 /// Badge que muestra el estado de validación de una receta:
 /// Borrador, Pendiente (En Revisión), Publicada o Rechazada.
 class RecipeStatusBadge extends StatelessWidget {
@@ -40,10 +42,10 @@ class RecipeStatusBadge extends StatelessWidget {
       case 'borrador':
         return Colors.grey;
       case 'pendiente':
-        return Colors.amber;
+        return AppColors.brandGreen.withOpacity(0.7);
       case 'publicada':
       case 'aprobada':
-        return Colors.green;
+        return AppColors.brandGreen;
       case 'rechazada':
         return Colors.red;
       default:

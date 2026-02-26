@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-import 'screens/app_start_screen.dart';
-import 'screens/login_screen.dart';
+import 'screens/splash_screen.dart';
 import 'services/alarma_notification_service.dart';
 import 'services/shopping_service.dart';
 import 'state/kitchen_state.dart';
+import 'theme/app_colors.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,10 +25,26 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider<KitchenState>(create: (_) => KitchenState()),
       ],
       child: MaterialApp(
-      title: 'App Cocina',
+      title: 'ChefPlanner',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF00914E)),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: AppColors.brandBlue,
+          brightness: Brightness.light,
+          primary: AppColors.brandBlue,
+          onPrimary: AppColors.brandWhite,
+          surface: AppColors.stainlessLight,
+        ),
         useMaterial3: true,
+        scaffoldBackgroundColor: AppColors.stainlessLight,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: AppColors.brandBlue,
+          foregroundColor: AppColors.brandWhite,
+          elevation: 0,
+        ),
+        drawerTheme: const DrawerThemeData(
+          backgroundColor: AppColors.brandWhite,
+          surfaceTintColor: Colors.transparent,
+        ),
       ),
       locale: const Locale('es', 'ES'),
       supportedLocales: const [
@@ -41,34 +56,8 @@ class MyApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      home: const EntryGate(),
+      home: const SplashScreen(),
     ),
-    );
-  }
-}
-
-class EntryGate extends StatelessWidget {
-  const EntryGate({super.key});
-
-  Future<bool> _hasToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    return token != null && token.isNotEmpty;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: _hasToken(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-        final hasToken = snapshot.data ?? false;
-        return hasToken ? const AppStartScreen() : const LoginScreen();
-      },
     );
   }
 }

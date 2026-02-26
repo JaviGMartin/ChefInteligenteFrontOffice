@@ -3,6 +3,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../models/contenedor.dart';
+import '../theme/app_colors.dart';
 import '../models/lista_compra.dart';
 import '../services/shopping_service.dart';
 import '../services/stock_service.dart';
@@ -64,9 +65,9 @@ class _ShoppingListsScreenState extends State<ShoppingListsScreen>
     if (completados.isEmpty) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Marca al menos un producto como comprado para finalizar.'),
-            backgroundColor: Colors.orange,
+          SnackBar(
+            content: const Text('Marca al menos un producto como comprado para finalizar.'),
+            backgroundColor: AppColors.brandGreen.withOpacity(0.8),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -91,9 +92,9 @@ class _ShoppingListsScreenState extends State<ShoppingListsScreen>
     if (contenedores.isEmpty) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Crea al menos un contenedor en Despensa para poder finalizar la compra.'),
-            backgroundColor: Colors.orange,
+          SnackBar(
+            content: const Text('Crea al menos un contenedor en Despensa para poder finalizar la compra.'),
+            backgroundColor: AppColors.brandGreen.withOpacity(0.8),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -114,7 +115,7 @@ class _ShoppingListsScreenState extends State<ShoppingListsScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(result.message),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.brandGreen,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -377,13 +378,13 @@ class _ListItemTile extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
         color: isCompletado && !isProcesado
-            ? Colors.green.shade50
+            ? AppColors.brandGreen.withOpacity(0.12)
             : (isProcesado
                 ? Theme.of(context).colorScheme.surfaceContainerHighest
                 : null),
         borderRadius: BorderRadius.circular(12),
         border: isCompletado && !isProcesado
-            ? Border.all(color: Colors.green.shade200, width: 1)
+            ? Border.all(color: AppColors.brandGreen.withOpacity(0.4), width: 1)
             : null,
       ),
       child: ListTile(
@@ -393,7 +394,7 @@ class _ListItemTile extends StatelessWidget {
             : Checkbox(
                 value: isCompletado,
                 onChanged: onToggle == null ? null : (v) => onToggle!(v ?? false),
-                activeColor: Colors.green.shade700,
+                activeColor: AppColors.brandGreen,
               ),
         title: Text(
           nombre,

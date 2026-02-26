@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Atajos de la app: "Recetas" abre chefplanner://app/recipes (p. ej. desde el Asistente si se configura).
+     El intent-filter en MainActivity maneja el deep link.
+     Capability OPEN_APP_FEATURE: para que "Oye Google, abre Chef Planner y muestra las recetas" dispare el deep link. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- App Action: Built-in Intent para abrir una función de la app por voz -->
+    <capability android:name="actions.intent.OPEN_APP_FEATURE">
+        <intent>
+            <parameter
+                android:name="feature"
+                android:key="featureName" />
+            <url-template android:value="chefplanner://app/{featureName}" />
+        </intent>
+        <shortcut
+            android:shortcutId="recipes"
+            android:enabled="true"
+            android:icon="@mipmap/ic_launcher"
+            android:shortcutShortLabel="@string/shortcut_recipes_label"
+            android:shortcutLongLabel="@string/shortcut_recipes_long_label">
+            <intent
+                android:action="android.intent.action.VIEW"
+                android:data="chefplanner://app/recipes" />
+            <capability android:name="actions.intent.OPEN_APP_FEATURE">
+                <parameter
+                    android:name="feature"
+                    android:value="recipes" />
+            </capability>
+        </shortcut>
+    </capability>
+</shortcuts>

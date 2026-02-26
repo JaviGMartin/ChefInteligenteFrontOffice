@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
 import 'app_drawer.dart';
 
 class MainLayout extends StatelessWidget {
@@ -19,21 +20,22 @@ class MainLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final canPop = ModalRoute.of(context)?.canPop ?? false;
-    final primary = Theme.of(context).colorScheme.primary;
     return Scaffold(
       appBar: AppBar(
-        leading: canPop ? BackButton(color: primary) : null,
-        iconTheme: IconThemeData(color: primary),
-        titleTextStyle: TextStyle(
-          color: primary,
+        leading: canPop ? const BackButton(color: AppColors.brandWhite) : null,
+        iconTheme: const IconThemeData(color: AppColors.brandWhite),
+        titleTextStyle: const TextStyle(
+          color: AppColors.brandWhite,
           fontSize: 20,
           fontWeight: FontWeight.w600,
         ),
         title: Text(title),
+        backgroundColor: AppColors.brandBlue,
+        foregroundColor: AppColors.brandWhite,
         actions: actions,
       ),
       drawer: const AppDrawer(),
-      body: child,
+      body: StainlessBackground(child: child),
       floatingActionButton: floatingActionButton,
     );
   }

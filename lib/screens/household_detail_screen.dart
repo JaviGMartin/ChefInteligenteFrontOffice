@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/contenedor.dart';
+import '../theme/app_colors.dart';
 import '../models/hogar.dart';
 import '../models/inventario.dart';
 import '../models/unidad_medida.dart';
@@ -782,7 +783,7 @@ class _HouseholdDetailScreenState extends State<HouseholdDetailScreen>
                             _expandedSections[key] = expanded;
                           });
                         },
-                        backgroundColor: Colors.grey.shade50,
+                        backgroundColor: AppColors.stainlessLight,
                         collapsedBackgroundColor: Colors.grey.shade100,
                         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                         childrenPadding: const EdgeInsets.only(bottom: 8),
@@ -900,7 +901,7 @@ class _HouseholdDetailScreenState extends State<HouseholdDetailScreen>
       return Colors.redAccent;
     }
     if (dateOnly.difference(nowOnly).inDays <= 3) {
-      return Colors.orange;
+      return AppColors.brandGreen.withOpacity(0.8);
     }
     return Colors.black54;
   }

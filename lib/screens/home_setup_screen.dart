@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
 import '../services/hogar_service.dart';
 import '../widgets/app_drawer.dart';
 import 'recipe_list_screen.dart';
@@ -77,13 +78,14 @@ class _HomeSetupScreenState extends State<HomeSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const cardShape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.all(Radius.circular(16)),
+    final cardShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
     );
     return Scaffold(
       appBar: AppBar(title: const Text('Configurar hogar')),
       drawer: const AppDrawer(),
-      body: ListView(
+      body: StainlessBackground(
+        child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Card(
@@ -191,6 +193,7 @@ class _HomeSetupScreenState extends State<HomeSetupScreen> {
             ),
           ),
         ],
+        ),
       ),
     );
   }

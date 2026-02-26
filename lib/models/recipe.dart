@@ -21,6 +21,9 @@ class Ingredient {
   final double? cantidad;
   final int? unidadMedidaId;
   final UnidadMedida? unidadMedida;
+  /// Tipos de unidad permitidos para este ingrediente (ej: ['peso', 'volumen']).
+  /// Si null o vacío, se muestran todas las unidades no tiempo.
+  final List<String>? tiposUnidad;
 
   const Ingredient({
     required this.id,
@@ -28,9 +31,16 @@ class Ingredient {
     this.cantidad,
     this.unidadMedidaId,
     this.unidadMedida,
+    this.tiposUnidad,
   });
 
   factory Ingredient.fromJson(Map<String, dynamic> json) {
+    List<String>? tiposUnidad;
+    final tu = json['tipos_unidad'];
+    if (tu is List) {
+      tiposUnidad = tu.whereType<String>().toList();
+      if (tiposUnidad.isEmpty) tiposUnidad = null;
+    }
     return Ingredient(
       id: (json['id'] as num).toInt(),
       nombre: (json['nombre'] as String?) ?? '',
@@ -39,6 +49,7 @@ class Ingredient {
       unidadMedida: json['unidad_medida'] != null
           ? UnidadMedida.fromJson(json['unidad_medida'] as Map<String, dynamic>)
           : null,
+      tiposUnidad: tiposUnidad,
     );
   }
 
@@ -160,6 +171,8 @@ class Recipe {
   final int? tiempoPreparacion;
   final String? dificultad;
   final int? porcionesBase;
+  /// Herramientas necesarias (ej. sartén, batidora). Viene de API.
+  final List<String>? herramientas;
   final String? estado;
   final double? averageRating;
   final int? userId;
@@ -204,6 +217,7 @@ class Recipe {
     required this.tiempoPreparacion,
     required this.dificultad,
     required this.porcionesBase,
+    this.herramientas,
     required this.estado,
     required this.averageRating,
     required this.userId,
@@ -234,6 +248,9 @@ class Recipe {
       tiempoPreparacion: (json['tiempo_preparacion'] as num?)?.toInt(),
       dificultad: json['dificultad'] as String?,
       porcionesBase: (json['porciones_base'] as num?)?.toInt(),
+      herramientas: (json['herramientas'] as List<dynamic>?)
+          ?.whereType<String>()
+          .toList(),
       estado: json['estado'] as String?,
       averageRating: (json['average_rating'] as num?)?.toDouble(),
       userId: (json['user_id'] as num?)?.toInt(),
@@ -269,6 +286,7 @@ class Recipe {
       'tiempo_preparacion': tiempoPreparacion,
       'dificultad': dificultad,
       'porciones_base': porcionesBase,
+      if (herramientas != null && herramientas!.isNotEmpty) 'herramientas': herramientas,
       'estado': estado,
       'average_rating': averageRating,
       'user_id': userId,

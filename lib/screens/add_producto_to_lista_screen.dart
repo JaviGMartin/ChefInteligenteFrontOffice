@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../theme/app_colors.dart';
 import '../services/shopping_service.dart';
+import '../widgets/cantidad_dialog.dart';
 
 /// Pantalla para elegir un producto y añadirlo a una lista de compra (Crear ítem).
+/// Carga productos con búsqueda en servidor (debounce) para no cargar todo el catálogo.
 class AddProductoToListaScreen extends StatefulWidget {
   const AddProductoToListaScreen({
     super.key,
@@ -17,29 +22,62 @@ class AddProductoToListaScreen extends StatefulWidget {
 }
 
 class _AddProductoToListaScreenState extends State<AddProductoToListaScreen> {
+  static const int _perPage = 100;
+
   List<ProductoSimple>? _productos;
-  List<ProductoSimple>? _filtered;
   String _query = '';
   Object? _error;
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  int _page = 1;
+  String? _currentSearch;
+  Timer? _debounceTimer;
+  final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _load(search: null);
+    _scrollController.addListener(_onScroll);
   }
 
-  Future<void> _load() async {
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_hasMore || _loadingMore || _loading || _productos == null) return;
+    final pos = _scrollController.position;
+    if (pos.pixels >= pos.maxScrollExtent - 200) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _load({String? search}) async {
     setState(() {
       _loading = true;
       _error = null;
+      _page = 1;
+      _hasMore = true;
+      _currentSearch = search?.trim().isEmpty == true ? null : search;
     });
     try {
-      final list = await context.read<ShoppingService>().getProductos();
+      final list = await context.read<ShoppingService>().getProductos(
+            q: _currentSearch,
+            perPage: _perPage,
+            page: 1,
+          );
       if (!mounted) return;
       setState(() {
         _productos = list;
-        _filtered = _applyQuery(list, _query);
+        _hasMore = list.length >= _perPage;
         _loading = false;
       });
     } catch (e) {
@@ -51,14 +89,37 @@ class _AddProductoToListaScreenState extends State<AddProductoToListaScreen> {
     }
   }
 
-  List<ProductoSimple> _applyQuery(List<ProductoSimple> list, String q) {
-    if (q.trim().isEmpty) return list;
-    final lower = q.trim().toLowerCase();
-    return list
-        .where((p) =>
-            p.nombre.toLowerCase().contains(lower) ||
-            (p.marca?.toLowerCase().contains(lower) ?? false))
-        .toList();
+  Future<void> _loadMore() async {
+    if (!_hasMore || _loadingMore || _productos == null) return;
+    setState(() => _loadingMore = true);
+    final nextPage = _page + 1;
+    try {
+      final list = await context.read<ShoppingService>().getProductos(
+            q: _currentSearch,
+            perPage: _perPage,
+            page: nextPage,
+          );
+      if (!mounted) return;
+      setState(() {
+        _productos = [..._productos!, ...list];
+        _page = nextPage;
+        _hasMore = list.length >= _perPage;
+        _loadingMore = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingMore = false);
+    }
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() => _query = value);
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      final searchText = _searchController.text.trim();
+      _load(search: searchText.isEmpty ? null : searchText);
+    });
   }
 
   Future<void> _anadirProducto(ProductoSimple producto) async {
@@ -78,7 +139,7 @@ class _AddProductoToListaScreenState extends State<AddProductoToListaScreen> {
 
     final result = await showDialog<(double, bool, int?, int?)>(
       context: context,
-      builder: (context) => _CantidadDialog(
+      builder: (context) => CantidadDialog(
         producto: producto,
         formatos: formatos,
         unidades: unidades,
@@ -100,7 +161,7 @@ class _AddProductoToListaScreenState extends State<AddProductoToListaScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Producto añadido a la lista.'),
-          backgroundColor: Colors.green,
+          backgroundColor: AppColors.brandGreen,
         ),
       );
       Navigator.of(context).pop(true);
@@ -126,18 +187,14 @@ class _AddProductoToListaScreenState extends State<AddProductoToListaScreen> {
           Padding(
             padding: const EdgeInsets.all(8),
             child: TextField(
+              controller: _searchController,
               decoration: const InputDecoration(
                 labelText: 'Buscar',
                 hintText: 'Nombre o marca',
                 prefixIcon: Icon(Icons.search),
                 border: OutlineInputBorder(),
               ),
-              onChanged: (s) {
-                setState(() {
-                  _query = s;
-                  _filtered = _productos != null ? _applyQuery(_productos!, _query) : null;
-                });
-              },
+              onChanged: _onSearchChanged,
             ),
           ),
           Expanded(
@@ -162,7 +219,10 @@ class _AddProductoToListaScreenState extends State<AddProductoToListaScreen> {
               Text(_error.toString().replaceFirst('Exception: ', '')),
               const SizedBox(height: 16),
               FilledButton.icon(
-                onPressed: _load,
+                onPressed: () {
+                  final t = _searchController.text.trim();
+                  _load(search: t.isEmpty ? null : t);
+                },
                 icon: const Icon(Icons.refresh),
                 label: const Text('Reintentar'),
               ),
@@ -172,20 +232,27 @@ class _AddProductoToListaScreenState extends State<AddProductoToListaScreen> {
       );
     }
 
-    final list = _filtered ?? [];
+    final list = _productos ?? [];
     if (list.isEmpty) {
       return Center(
         child: Text(
           _query.trim().isEmpty
-              ? 'No hay productos.'
+              ? 'No hay productos. Usa el buscador para buscar por nombre o marca.'
               : 'Sin resultados para "$_query".',
         ),
       );
     }
 
     return ListView.builder(
-      itemCount: list.length,
+      controller: _scrollController,
+      itemCount: list.length + (_hasMore && _loadingMore ? 1 : 0),
       itemBuilder: (context, index) {
+        if (index >= list.length) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
         final p = list[index];
         return ListTile(
           title: Text(p.nombre),
@@ -199,199 +266,3 @@ class _AddProductoToListaScreenState extends State<AddProductoToListaScreen> {
   }
 }
 
-class _CantidadDialog extends StatefulWidget {
-  const _CantidadDialog({
-    required this.producto,
-    this.formatos = const [],
-    this.unidades = const [],
-  });
-
-  final ProductoSimple producto;
-  final List<FormatoProveedor> formatos;
-  final List<UnidadMedidaCompleta> unidades;
-
-  @override
-  State<_CantidadDialog> createState() => _CantidadDialogState();
-}
-
-class _CantidadDialogState extends State<_CantidadDialog> {
-  final _controller = TextEditingController(text: '1');
-  bool _completado = false;
-  FormatoProveedor? _formatoSeleccionado;
-  UnidadMedidaCompleta? _unidadSeleccionada;
-
-  /// Unidades relevantes según el tipo del formato (volumen/peso) o del producto. Siempre incluye "Unidad" (packs).
-  static List<UnidadMedidaCompleta> _unidadesRelevantes(
-    List<UnidadMedidaCompleta> todas, {
-    FormatoProveedor? formato,
-    ProductoSimple? producto,
-  }) {
-    String? tipo;
-    if (formato != null && (formato.unidadMedidaTipo == 'volumen' || formato.unidadMedidaTipo == 'peso')) {
-      tipo = formato.unidadMedidaTipo;
-    } else if (producto != null && producto.unidadMedidaId != null) {
-      try {
-        final u = todas.firstWhere((x) => x.id == producto.unidadMedidaId);
-        if (u.tipo == 'volumen' || u.tipo == 'peso') tipo = u.tipo;
-      } catch (_) {}
-    }
-    if (tipo == null) tipo = 'volumen'; // fallback para productos sin formato
-    return todas
-        .where((u) => u.tipo == 'unidad' || u.tipo == tipo)
-        .toList();
-  }
-
-  List<UnidadMedidaCompleta> _getUnidadesRelevantes() => _unidadesRelevantes(
-        widget.unidades,
-        formato: _formatoSeleccionado,
-        producto: widget.producto,
-      );
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.formatos.isNotEmpty) {
-      _formatoSeleccionado = widget.formatos.first;
-    }
-    final relevantes = _getUnidadesRelevantes();
-    if (relevantes.isNotEmpty) {
-      if (widget.formatos.isNotEmpty) {
-        try {
-          _unidadSeleccionada = relevantes.firstWhere((u) => u.tipo == 'unidad');
-        } catch (_) {
-          _unidadSeleccionada = relevantes.first;
-        }
-      } else {
-        if (widget.producto.unidadMedidaId != null) {
-          try {
-            _unidadSeleccionada = relevantes.firstWhere((u) => u.id == widget.producto.unidadMedidaId);
-          } catch (_) {
-            _unidadSeleccionada = relevantes.first;
-          }
-        } else {
-          _unidadSeleccionada = relevantes.first;
-        }
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final formatos = widget.formatos;
-    final mostrarFormato = formatos.isNotEmpty;
-    final unidadesRelevantes = _getUnidadesRelevantes();
-    final mostrarUnidadMedida = unidadesRelevantes.length > 1;
-    final labelCantidad = _unidadSeleccionada != null
-        ? 'Cantidad (${_unidadSeleccionada!.abreviatura ?? _unidadSeleccionada!.nombre})'
-        : 'Cantidad (${widget.producto.unidadMedidaAbreviatura ?? 'ud.'})';
-
-    return AlertDialog(
-      title: Text(widget.producto.nombre),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (mostrarFormato) ...[
-              DropdownButtonFormField<FormatoProveedor>(
-                value: _formatoSeleccionado,
-                decoration: const InputDecoration(
-                  labelText: 'Formato (pack / unidad)',
-                  border: OutlineInputBorder(),
-                ),
-                items: formatos
-                    .map((f) => DropdownMenuItem(
-                          value: f,
-                          child: Text(f.label),
-                        ))
-                    .toList(),
-                onChanged: (f) {
-                  setState(() {
-                    _formatoSeleccionado = f;
-                    final nuevas = _getUnidadesRelevantes();
-                    if (nuevas.isNotEmpty && _unidadSeleccionada != null) {
-                      final estaEnLista = nuevas.any((u) => u.id == _unidadSeleccionada!.id);
-                      if (!estaEnLista) {
-                        try {
-                          _unidadSeleccionada = nuevas.firstWhere((u) => u.tipo == 'unidad');
-                        } catch (_) {
-                          _unidadSeleccionada = nuevas.first;
-                        }
-                      }
-                    }
-                  });
-                },
-              ),
-              const SizedBox(height: 12),
-            ],
-            if (mostrarUnidadMedida) ...[
-              DropdownButtonFormField<UnidadMedidaCompleta>(
-                value: _unidadSeleccionada,
-                decoration: InputDecoration(
-                  labelText: 'Unidad de medida',
-                  border: const OutlineInputBorder(),
-                  helperText: _formatoSeleccionado?.unidadMedidaTipo == 'peso'
-                      ? 'Elige Unidad (packs) o unidades de peso (kg, gr). Al procesar la compra se convierte.'
-                      : 'Elige Unidad (packs) o unidades de volumen (L, ml). Al procesar la compra se convierte.',
-                ),
-                items: unidadesRelevantes
-                    .map((u) => DropdownMenuItem(
-                          value: u,
-                          child: Text('${u.nombre}${u.abreviatura != null && u.abreviatura != u.nombre ? ' (${u.abreviatura})' : ''}'),
-                        ))
-                    .toList(),
-                onChanged: (u) => setState(() => _unidadSeleccionada = u),
-              ),
-              const SizedBox(height: 12),
-            ],
-            TextField(
-              controller: _controller,
-              decoration: InputDecoration(
-                labelText: labelCantidad,
-                border: const OutlineInputBorder(),
-              ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              autofocus: !mostrarFormato,
-            ),
-            const SizedBox(height: 12),
-            CheckboxListTile(
-              value: _completado,
-              onChanged: (v) => setState(() => _completado = v ?? false),
-              title: const Text('Ya en el carro'),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: () {
-            final v = double.tryParse(
-                _controller.text.trim().replaceAll(',', '.'));
-            if (v != null && v > 0) {
-              final formatoId = _formatoSeleccionado?.id;
-              final unidadId = _unidadSeleccionada?.id;
-              Navigator.of(context).pop<(double, bool, int?, int?)>((
-                v,
-                _completado,
-                formatoId,
-                unidadId,
-              ));
-            }
-          },
-          child: const Text('Añadir'),
-        ),
-      ],
-    );
-  }
-}

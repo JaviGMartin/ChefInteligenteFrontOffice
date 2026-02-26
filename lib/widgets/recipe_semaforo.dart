@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/recipe.dart';
+import '../theme/app_colors.dart';
 import '../services/recipe_service.dart';
 
 /// Lógica reutilizable del semáforo de recetas (stock/disponibilidad).
@@ -43,29 +44,29 @@ class RecipeSemaforo {
 
   static Color color(Recipe recipe) {
     if (recipe.estadoDisponibilidadCompleta == 'en_camino') {
-      return Colors.blue;
+      return AppColors.brandBlue;
     }
     final texto = RecipeSemaforo.texto(recipe);
-    if (texto == '¡Listo para cocinar!' || texto == 'Listo para cocinar (con avisos)') return Colors.green;
-    if (texto == 'Faltan algunos ingredientes') return Colors.orange;
+    if (texto == '¡Listo para cocinar!' || texto == 'Listo para cocinar (con avisos)') return AppColors.brandGreen;
+    if (texto == 'Faltan algunos ingredientes') return AppColors.brandGreen.withOpacity(0.7);
     return Colors.red;
   }
 
-  /// Color solo para el indicador de stock (%). Verde si 100%, naranja si parcial, rojo si 0.
+  /// Color solo para el indicador de stock (%). Verde si 100%, tono intermedio si parcial, rojo si 0.
   static Color colorSoloStock(Recipe recipe) {
     final p = recipe.porcentajeStock;
     if (p == null) return Colors.grey;
-    if (p >= 100) return Colors.green;
-    if (p > 0) return Colors.orange;
+    if (p >= 100) return AppColors.brandGreen;
+    if (p > 0) return AppColors.brandGreen.withOpacity(0.7);
     return Colors.red;
   }
 
   static Color colorFromEstado(String? estadoSalud) {
     switch (estadoSalud) {
       case 'success':
-        return Colors.green;
+        return AppColors.brandGreen;
       case 'warning':
-        return Colors.amber;
+        return AppColors.brandGreen.withOpacity(0.7);
       case 'danger':
         return Colors.red;
       case 'gray':

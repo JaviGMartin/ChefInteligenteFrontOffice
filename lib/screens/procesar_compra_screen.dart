@@ -3,6 +3,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../models/contenedor.dart';
+import '../theme/app_colors.dart';
 import '../models/lista_compra.dart';
 import '../services/shopping_service.dart';
 import '../services/stock_service.dart';
@@ -130,7 +131,7 @@ class _ProcesarCompraScreenState extends State<ProcesarCompraScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result.message),
-          backgroundColor: Colors.green,
+          backgroundColor: AppColors.brandGreen,
         ),
       );
       Navigator.of(context).pop(true);

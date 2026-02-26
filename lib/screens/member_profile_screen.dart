@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/hogar_equipo.dart';
 import '../models/intolerancia.dart';
 import '../services/hogar_service.dart';
+import '../theme/app_colors.dart';
 import '../widgets/main_layout.dart';
 
 class MemberProfileScreen extends StatefulWidget {
@@ -28,7 +29,7 @@ class MemberProfileScreen extends StatefulWidget {
 }
 
 class _MemberProfileScreenState extends State<MemberProfileScreen> {
-  static const Color _accent = Color(0xFF00914E);
+  static const Color _accent = AppColors.brandGreen;
   static const Color _ownerGold = Color(0xFFD4AF37);
   late TextEditingController _nameController;
   late TextEditingController _birthDateController;
@@ -490,8 +491,8 @@ class _MemberProfileScreenState extends State<MemberProfileScreen> {
                       .map(
                         (i) => Chip(
                           label: Text(i.nombre),
-                          backgroundColor: Colors.orange.shade50,
-                          side: BorderSide(color: Colors.orange.shade200),
+                          backgroundColor: AppColors.brandGreen.withOpacity(0.15),
+                          side: BorderSide(color: AppColors.brandGreen.withOpacity(0.4)),
                         ),
                       )
                       .toList(),

@@ -3,6 +3,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../models/lista_compra.dart';
+import '../theme/app_colors.dart';
 import '../models/pendiente_compra.dart';
 import '../models/recipe.dart';
 import '../services/hogar_service.dart';
@@ -292,7 +293,7 @@ class _CocinaTab extends StatelessWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(result.message.isNotEmpty ? result.message : 'No se añadió ningún ingrediente. Las recetas ya estaban en el embudo o tienes todo el stock.'),
-            backgroundColor: Colors.orange,
+            backgroundColor: AppColors.brandGreen.withOpacity(0.8),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -400,10 +401,10 @@ class _FaltantesYSalud extends StatelessWidget {
   }
 
   static Color _colorSalud(String? mensajeSalud) {
-    if (_esSinAlertas(mensajeSalud)) return Colors.green;
+    if (_esSinAlertas(mensajeSalud)) return AppColors.brandGreen;
     final m = (mensajeSalud ?? '').toLowerCase();
     if (m.contains('peligro')) return Colors.red;
-    return Colors.orange;
+    return AppColors.brandGreen.withOpacity(0.7);
   }
 
   @override
@@ -928,41 +929,42 @@ class _ListasCompraTabState extends State<_ListasCompraTab> with TickerProviderS
 
   Future<void> _refresh() async {
     if (!mounted) return;
-    await Future.microtask(() {
-      if (mounted) {
-        setState(() {
-          _listasActivasFuture = context.read<ShoppingService>().getListas(archivada: false);
-          _listasPendientesFuture = context.read<ShoppingService>().getListas(archivada: false, pendienteProcesar: true);
-          _listasArchivadasFuture = context.read<ShoppingService>().getListas(archivada: true);
-        });
-      }
+    final shopping = context.read<ShoppingService>();
+    final activas = shopping.getListas(archivada: false);
+    final pendientes = shopping.getListas(archivada: false, pendienteProcesar: true);
+    final archivadas = shopping.getListas(archivada: true);
+    if (!mounted) return;
+    setState(() {
+      _listasActivasFuture = activas;
+      _listasPendientesFuture = pendientes;
+      _listasArchivadasFuture = archivadas;
     });
   }
 
   Future<void> _refreshActivas() async {
     if (!mounted) return;
-    await Future.microtask(() {
-      if (mounted) {
-        setState(() => _listasActivasFuture = context.read<ShoppingService>().getListas(archivada: false));
-      }
+    final future = context.read<ShoppingService>().getListas(archivada: false);
+    if (!mounted) return;
+    setState(() {
+      _listasActivasFuture = future;
     });
   }
 
   Future<void> _refreshPendientes() async {
     if (!mounted) return;
-    await Future.microtask(() {
-      if (mounted) {
-        setState(() => _listasPendientesFuture = context.read<ShoppingService>().getListas(archivada: false, pendienteProcesar: true));
-      }
+    final future = context.read<ShoppingService>().getListas(archivada: false, pendienteProcesar: true);
+    if (!mounted) return;
+    setState(() {
+      _listasPendientesFuture = future;
     });
   }
 
   Future<void> _refreshArchivadas() async {
     if (!mounted) return;
-    await Future.microtask(() {
-      if (mounted) {
-        setState(() => _listasArchivadasFuture = context.read<ShoppingService>().getListas(archivada: true));
-      }
+    final future = context.read<ShoppingService>().getListas(archivada: true);
+    if (!mounted) return;
+    setState(() {
+      _listasArchivadasFuture = future;
     });
   }
 

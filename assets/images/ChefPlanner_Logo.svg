@@ -1,0 +1,23 @@
+<svg width="400" height="400" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Fondo azul oscuro redondeado -->
+  <rect width="400" height="400" rx="40" fill="#1B263B"/>
+  <!-- Gorro de chef (sombrero tipo nube) -->
+  <path d="M115 168 Q115 128 200 128 Q285 128 285 168 L285 205 L115 205 Z" fill="white"/>
+  <ellipse cx="200" cy="162" rx="92" ry="32" fill="white"/>
+  <!-- Check verde sobre el gorro -->
+  <path d="M162 138 L192 172 L258 106" stroke="#70E000" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Silueta: cuello de camisa -->
+  <path d="M160 208 L200 248 L240 208 L220 208 L200 228 L180 208 Z" fill="white"/>
+  <!-- Corbata de lazo (bow tie) -->
+  <ellipse cx="175" cy="235" rx="22" ry="10" fill="white"/>
+  <ellipse cx="225" cy="235" rx="22" ry="10" fill="white"/>
+  <circle cx="200" cy="235" r="6" fill="white"/>
+  <!-- Cuerpo/camisa -->
+  <path d="M148 248 L252 248 L240 300 L160 300 Z" fill="white"/>
+  <!-- Texto: Chef (negrita, blanco) -->
+  <text x="200" y="338" text-anchor="middle" font-family="Arial, sans-serif" font-weight="bold" font-size="32" fill="white">Chef</text>
+  <!-- Texto: Planner (blanco) -->
+  <text x="200" y="368" text-anchor="middle" font-family="Arial, sans-serif" font-weight="normal" font-size="28" fill="white">Planner</text>
+  <!-- Texto: .es (verde) -->
+  <text x="200" y="394" text-anchor="middle" font-family="Arial, sans-serif" font-weight="normal" font-size="26" fill="#70E000">.es</text>
+</svg>

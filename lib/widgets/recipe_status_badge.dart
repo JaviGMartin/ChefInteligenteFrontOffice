@@ -40,7 +40,7 @@ class RecipeStatusBadge extends StatelessWidget {
     if (e.isEmpty) return Colors.grey;
     switch (e) {
       case 'borrador':
-        return Colors.grey;
+        return AppColors.brandBlue;
       case 'pendiente':
         return AppColors.brandGreen.withOpacity(0.7);
       case 'publicada':

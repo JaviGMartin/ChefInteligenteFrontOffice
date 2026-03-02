@@ -12,11 +12,12 @@ import '../services/shopping_service.dart';
 import '../state/kitchen_state.dart';
 import '../widgets/main_layout.dart';
 import '../widgets/recipe_semaforo.dart';
+import '../widgets/star_rating.dart';
 import 'elaboracion_screen.dart';
 import 'recipe_detail_screen.dart';
 import 'single_shopping_list_screen.dart';
 
-/// Flujo: Cocina → Listas compra → Embudo → Compras. Catálogo en menú Recetas.
+/// Flujo: Cocina → Listas compra → Ingredientes a productos → Compras. Catálogo en menú Recetas.
 /// Estado centralizado en [KitchenState].
 class KitchenFunnelScreen extends StatefulWidget {
   const KitchenFunnelScreen({super.key});
@@ -91,7 +92,7 @@ class _KitchenFunnelScreenState extends State<KitchenFunnelScreen>
             tabs: const [
               Tab(text: 'Cocina'),
               Tab(text: 'Listas compra'),
-              Tab(text: 'Embudo'),
+              Tab(text: 'Ingredientes a productos'),
               Tab(text: 'Compras'),
             ],
           ),
@@ -112,7 +113,7 @@ class _KitchenFunnelScreenState extends State<KitchenFunnelScreen>
   }
 }
 
-/// Pestaña Cocina: semáforos reales. Botón "Enviar ingredientes faltantes a embudo".
+/// Pestaña Cocina: semáforos reales. Botón "Enviar ingredientes faltantes a Ingredientes a productos".
 class _CocinaTab extends StatelessWidget {
   const _CocinaTab({this.onNavigateToEmbudo});
 
@@ -179,7 +180,7 @@ class _CocinaTab extends StatelessWidget {
           child: FilledButton.icon(
             onPressed: state.isLoadingPendientes ? null : () => _actualizarFaltantesYNavegar(context),
             icon: state.isLoadingPendientes ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(LucideIcons.packageSearch, size: 20),
-            label: const Text('Enviar ingredientes faltantes a embudo'),
+            label: const Text('Enviar ingredientes faltantes a Ingredientes a productos'),
             style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
           ),
         ),
@@ -204,10 +205,12 @@ class _CocinaTab extends StatelessWidget {
                                 child: RecipeSemaphoreTile(
                                   recipe: recipe,
                                   showSemaforo: true,
-                                  subtitle: Text(
-                                    recipe.averageRating != null ? 'Rating: ${recipe.averageRating}' : RecipeSemaforo.texto(recipe),
-                                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                  ),
+                                  subtitle: recipe.averageRating != null
+                                      ? StarRating(rating: recipe.averageRating, size: 16)
+                                      : Text(
+                                          RecipeSemaforo.texto(recipe),
+                                          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                        ),
                                   onTap: () async {
                                     await Navigator.of(context).push(
                                       MaterialPageRoute<void>(builder: (_) => RecipeDetailScreen(recipe: recipe, fromPlanificador: true)),
@@ -259,7 +262,7 @@ class _CocinaTab extends StatelessWidget {
         context.read<KitchenState>().loadPlanificador();
         context.read<KitchenState>().loadPendientes();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('«${recipe.titulo}» quitada del planificador. Se han restado sus cantidades del embudo.'), behavior: SnackBarBehavior.floating),
+          SnackBar(content: Text('«${recipe.titulo}» quitada del planificador. Se han restado sus cantidades de Ingredientes a productos.'), behavior: SnackBarBehavior.floating),
         );
       }
     } catch (e) {
@@ -284,7 +287,7 @@ class _CocinaTab extends StatelessWidget {
       if (result.ingredientesAnadidos > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result.message.isNotEmpty ? result.message : 'Ingredientes faltantes actualizados en el Embudo.'),
+            content: Text(result.message.isNotEmpty ? result.message : 'Ingredientes faltantes actualizados en Ingredientes a productos.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -292,7 +295,7 @@ class _CocinaTab extends StatelessWidget {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result.message.isNotEmpty ? result.message : 'No se añadió ningún ingrediente. Las recetas ya estaban en el embudo o tienes todo el stock.'),
+            content: Text(result.message.isNotEmpty ? result.message : 'No se añadió ningún ingrediente. Las recetas ya estaban en Ingredientes a productos o tienes todo el stock.'),
             backgroundColor: AppColors.brandGreen.withOpacity(0.8),
             behavior: SnackBarBehavior.floating,
           ),
@@ -485,7 +488,7 @@ class _DangerBanner extends StatelessWidget {
   }
 }
 
-/// Pestaña Embudo (faltantes). Lista consolidada desde [KitchenState.shoppingPendientes].
+/// Pestaña Ingredientes a productos (faltantes). Lista consolidada desde [KitchenState.shoppingPendientes].
 class _EmbudoTab extends StatelessWidget {
   const _EmbudoTab();
 
@@ -522,10 +525,10 @@ class _EmbudoTab extends StatelessWidget {
             children: [
               Icon(Icons.inbox_outlined, size: 64, color: Theme.of(context).colorScheme.outline),
               const SizedBox(height: 16),
-              Text('No hay ingredientes en el embudo', style: Theme.of(context).textTheme.titleMedium, textAlign: TextAlign.center),
+              Text('No hay ingredientes en Ingredientes a productos', style: Theme.of(context).textTheme.titleMedium, textAlign: TextAlign.center),
               const SizedBox(height: 8),
               Text(
-                'En "Cocina" pulsa "Enviar ingredientes faltantes a embudo" para traer aquí lo que falta para tus recetas.',
+                'En "Cocina" pulsa "Enviar ingredientes faltantes a Ingredientes a productos" para traer aquí lo que falta para tus recetas.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 textAlign: TextAlign.center,
               ),
@@ -646,6 +649,7 @@ class _ModalSeleccionLista extends StatefulWidget {
 }
 
 class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
+  late List<ListaCompraCabecera> _listas;
   late TextEditingController _cantidadController;
   List<ProductoSimple>? _productos;
   List<UnidadMedidaCompleta>? _unidades;
@@ -656,9 +660,119 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
   String? _errorProductos;
   String? _errorUnidades;
 
+  Future<void> _crearLista(BuildContext context) async {
+    final tituloController = TextEditingController();
+    final fechaController = TextEditingController();
+    DateTime? fechaSeleccionada;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Nueva lista de compra'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: tituloController,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Proveedor o nombre',
+                        hintText: 'Ej: Mercadona, Carrefour',
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: fechaController,
+                      readOnly: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Fecha prevista',
+                        hintText: 'Opcional',
+                        suffixIcon: Icon(Icons.calendar_today),
+                      ),
+                      onTap: () async {
+                        final fecha = await showDatePicker(
+                          context: context,
+                          initialDate: DateTime.now(),
+                          firstDate: DateTime.now(),
+                          lastDate: DateTime.now().add(const Duration(days: 365)),
+                        );
+                        if (fecha != null) {
+                          setDialogState(() {
+                            fechaSeleccionada = fecha;
+                            fechaController.text =
+                                '${fecha.day.toString().padLeft(2, '0')}/${fecha.month.toString().padLeft(2, '0')}/${fecha.year}';
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    if (tituloController.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('El nombre no puede estar vacío.')),
+                      );
+                      return;
+                    }
+                    Navigator.pop(dialogContext, true);
+                  },
+                  child: const Text('Crear'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == true && tituloController.text.trim().isNotEmpty && mounted) {
+      try {
+        final shopping = context.read<ShoppingService>();
+        final fechaPrevista = fechaSeleccionada != null
+            ? '${fechaSeleccionada!.year}-${fechaSeleccionada!.month.toString().padLeft(2, '0')}-${fechaSeleccionada!.day.toString().padLeft(2, '0')}'
+            : null;
+        await shopping.crearLista(tituloController.text.trim(), fechaPrevista: fechaPrevista);
+        final nuevasListas = await shopping.getListas();
+        setState(() {
+          _listas = nuevasListas;
+        });
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Lista "${tituloController.text.trim()}" creada.'), behavior: SnackBarBehavior.floating),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(e.toString().replaceFirst('Exception: ', '')),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    }
+    tituloController.dispose();
+    fechaController.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+    _listas = List<ListaCompraCabecera>.from(widget.listas);
     final pendiente = widget.pendiente;
     _cantidadController = TextEditingController(
       text: pendiente.cantidadCompra == pendiente.cantidadCompra.truncateToDouble()
@@ -688,6 +802,7 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
           _cargandoProductos = false;
           _errorProductos = null;
         });
+        await _ensureListaForProveedorSiAplica();
       }
     } catch (e) {
       if (mounted) {
@@ -696,6 +811,26 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
           _cargandoProductos = false;
         });
       }
+    }
+  }
+
+  /// Si el producto actual tiene proveedor con lista automática, obtiene o crea esa lista.
+  Future<void> _ensureListaForProveedorSiAplica() async {
+    if (_productoSeleccionadoId == null || _productos == null) return;
+    final product = _productos!.where((p) => p.id == _productoSeleccionadoId).firstOrNull;
+    if (product == null || product.proveedorId == null || !product.crearListaAutomatica) return;
+    try {
+      final shopping = context.read<ShoppingService>();
+      final lista = await shopping.getOrCreateListaForProveedor(product.proveedorId!);
+      if (!mounted) return;
+      final yaExiste = _listas.any((l) => l.id == lista.id);
+      if (!yaExiste) {
+        setState(() {
+          _listas = [lista, ..._listas];
+        });
+      }
+    } catch (_) {
+      // Proveedor sin lista automática o error de red; no bloquear el modal
     }
   }
 
@@ -731,6 +866,44 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
     }
   }
 
+  /// Al seleccionar un producto: si el proveedor tiene "crear lista automáticamente"
+  /// (ej. Mercadona), se obtiene o crea la lista de ese proveedor y se añade a las opciones.
+  Future<void> _onProductoSeleccionado(int? val) async {
+    setState(() => _productoSeleccionadoId = val);
+    if (val == null || _productos == null) return;
+    final product = _productos!.where((p) => p.id == val).firstOrNull;
+    if (product == null || product.proveedorId == null || !product.crearListaAutomatica) return;
+    try {
+      final shopping = context.read<ShoppingService>();
+      final lista = await shopping.getOrCreateListaForProveedor(product.proveedorId!);
+      if (!mounted) return;
+      final yaExiste = _listas.any((l) => l.id == lista.id);
+      if (!yaExiste) {
+        setState(() {
+          _listas = [lista, ..._listas];
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Lista "${lista.titulo}" disponible.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().replaceFirst('Exception: ', '')),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   void _onTapLista(int listaId) {
     final cantidadText = _cantidadController.text.trim();
     final cantidad = double.tryParse(cantidadText.replaceAll(',', '.'));
@@ -756,7 +929,7 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
   @override
   Widget build(BuildContext context) {
     final pendiente = widget.pendiente;
-    final listas = widget.listas;
+    final listas = _listas;
     return DraggableScrollableSheet(
       initialChildSize: 0.5,
       minChildSize: 0.3,
@@ -805,7 +978,7 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
                         child: Text(p.displayNombre, overflow: TextOverflow.ellipsis),
                       );
                     }).toList(),
-                    onChanged: (val) => setState(() => _productoSeleccionadoId = val),
+                    onChanged: (val) => _onProductoSeleccionado(val),
                   ),
                 )
               else
@@ -870,7 +1043,26 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
                 ),
               Expanded(
                 child: listas.isEmpty
-                    ? Center(child: Text('No tienes listas activas. Crea una en la web.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center))
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'No tienes listas activas.',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.icon(
+                              onPressed: () => _crearLista(context),
+                              icon: const Icon(Icons.add),
+                              label: const Text('Crear lista'),
+                            ),
+                          ],
+                        ),
+                      )
                     : ListView.builder(
                         controller: scrollController,
                         itemCount: listas.length,
@@ -1082,6 +1274,49 @@ class _ListasCompraTabState extends State<_ListasCompraTab> with TickerProviderS
     fechaController.dispose();
   }
 
+  Future<void> _editarFechaLista(BuildContext context, ListaCompraCabecera lista) async {
+    DateTime? fechaSeleccionada;
+    if (lista.fechaPrevista != null && lista.fechaPrevista!.isNotEmpty) {
+      final parts = lista.fechaPrevista!.split('-');
+      if (parts.length == 3) {
+        final y = int.tryParse(parts[0]);
+        final m = int.tryParse(parts[1]);
+        final d = int.tryParse(parts[2]);
+        if (y != null && m != null && d != null) {
+          fechaSeleccionada = DateTime(y, m, d);
+        }
+      }
+    }
+    fechaSeleccionada ??= DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: fechaSeleccionada,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      final fechaStr = '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+      await context.read<ShoppingService>().updateLista(lista.id, fechaPrevista: fechaStr);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Fecha de "${lista.titulo}" actualizada.'), behavior: SnackBarBehavior.floating),
+        );
+        await _refreshActivas();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().replaceFirst('Exception: ', '')),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _archivarLista(BuildContext context, ListaCompraCabecera lista) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -1177,6 +1412,7 @@ class _ListasCompraTabState extends State<_ListasCompraTab> with TickerProviderS
                 onRefreshActivas: _refreshActivas,
                 crearNuevaLista: _crearNuevaLista,
                 archivarLista: _archivarLista,
+                onEditarFecha: _editarFechaLista,
                 formatearFecha: _formatearFecha,
               ),
               _ListasPendientesProcesarView(
@@ -1199,7 +1435,7 @@ class _ListasCompraTabState extends State<_ListasCompraTab> with TickerProviderS
   }
 }
 
-/// Vista de listas activas: crear, archivar, sin borrar.
+/// Vista de listas activas: crear, archivar, editar fecha, sin borrar.
 class _ListasActivasView extends StatelessWidget {
   const _ListasActivasView({
     required this.listasFuture,
@@ -1207,6 +1443,7 @@ class _ListasActivasView extends StatelessWidget {
     required this.onRefreshActivas,
     required this.crearNuevaLista,
     required this.archivarLista,
+    required this.onEditarFecha,
     required this.formatearFecha,
   });
 
@@ -1215,6 +1452,7 @@ class _ListasActivasView extends StatelessWidget {
   final Future<void> Function() onRefreshActivas;
   final Future<void> Function(BuildContext) crearNuevaLista;
   final Future<void> Function(BuildContext, ListaCompraCabecera) archivarLista;
+  final Future<void> Function(BuildContext, ListaCompraCabecera) onEditarFecha;
   final String Function(String?) formatearFecha;
 
   @override
@@ -1302,6 +1540,11 @@ class _ListasActivasView extends StatelessWidget {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      IconButton(
+                        icon: Icon(Icons.calendar_today_outlined, color: Theme.of(context).colorScheme.primary),
+                        tooltip: 'Editar fecha',
+                        onPressed: () => onEditarFecha(context, lista),
+                      ),
                       if (puedeArchivar)
                         IconButton(
                           icon: Icon(Icons.archive_outlined, color: Theme.of(context).colorScheme.outline),

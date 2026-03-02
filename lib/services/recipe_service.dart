@@ -190,7 +190,7 @@ class RecipeService {
     return Recipe.fromJson(data);
   }
 
-  /// Envía los ingredientes faltantes de la receta al embudo de pendientes del hogar activo.
+  /// Envía los ingredientes faltantes de la receta a Ingredientes a productos del hogar activo.
   /// El backend usa el hogar activo del usuario (user.hogar_id), no hace falta enviarlo en el body.
   Future<void> enviarAPendientes(int recipeId, {int? porcionesDeseadas}) async {
     final token = await _getToken();
@@ -377,6 +377,32 @@ class RecipeService {
     }
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception('Error al marcar como cocinada: ${response.statusCode}');
+    }
+  }
+
+  /// Envía o actualiza una valoración (puntuación 1-5 y comentario opcional). La valoración queda pendiente de revisión por el admin.
+  Future<void> valorar(int recipeId, int puntuacion, {String? comentario}) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Debes iniciar sesión para valorar.');
+    }
+    final uri = Uri.parse('$baseUrl/recipes/$recipeId/valorar');
+    final body = <String, dynamic>{
+      'puntuacion': puntuacion,
+      if (comentario != null && comentario.trim().isNotEmpty) 'comentario': comentario.trim(),
+    };
+    final response = await http.post(
+      uri,
+      headers: _headers(token: token)..['Content-Type'] = 'application/json',
+      body: jsonEncode(body),
+    );
+    if (response.statusCode == 422 || response.statusCode == 403) {
+      final decoded = jsonDecode(response.body) as Map<String, dynamic>?;
+      final message = decoded?['message'] as String? ?? 'No se pudo enviar la valoración.';
+      throw Exception(message);
+    }
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception('Error al valorar: ${response.statusCode}');
     }
   }
 

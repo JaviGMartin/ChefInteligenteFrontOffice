@@ -10,6 +10,7 @@ import '../theme/app_colors.dart';
 import '../widgets/main_layout.dart';
 import '../widgets/recipe_semaforo.dart';
 import '../widgets/recipe_status_badge.dart';
+import '../widgets/star_rating.dart';
 import 'kitchen_funnel_screen.dart';
 import 'create_recipe_screen.dart';
 import 'recipe_detail_screen.dart';
@@ -267,12 +268,17 @@ class _RecipeTabList extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (recipe.averageRating != null)
-                Text(
-                  'Rating: ${recipe.averageRating}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                StarRating(
+                  rating: recipe.averageRating,
+                  size: 16,
+                  onTap: () async {
+                    await Navigator.of(context).push<void>(
+                      MaterialPageRoute<void>(
+                        builder: (_) => RecipeDetailScreen(recipe: recipe, scrollToComments: true),
+                      ),
+                    );
+                    onRefresh?.call();
+                  },
                 ),
               if (showStatusBadge)
                 RecipeStatusBadge(estado: recipe.estado, compact: true),

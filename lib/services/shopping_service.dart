@@ -49,7 +49,7 @@ class ShoppingService {
     return 'Error $statusCode';
   }
 
-  /// Lista los ítems del embudo (pendientes de compra) del hogar activo.
+  /// Lista los ítems de Ingredientes a productos (pendientes de compra) del hogar activo.
   Future<List<PendienteCompra>> getPendientes() async {
     final token = await _getToken();
     if (token == null || token.isEmpty) {
@@ -68,7 +68,7 @@ class ShoppingService {
         .toList();
   }
 
-  /// Envía al embudo los ingredientes faltantes de varias recetas (p. ej. del Planner).
+  /// Envía a Ingredientes a productos los ingredientes faltantes de varias recetas (p. ej. del Planner).
   /// [recipeIds] IDs de recetas. [porcionesDeseadas] opcional map recetaId -> porciones.
   Future<BulkEnviarResult> bulkEnviarAPendientes(
     List<int> recipeIds, {
@@ -101,7 +101,7 @@ class ShoppingService {
     );
   }
 
-  /// Mueve un pendiente del embudo a una lista de compra.
+  /// Mueve un pendiente de Ingredientes a productos a una lista de compra.
   /// [pendienteId] ID del PendienteCompra. Opcional: [listaDestinoId], [productoId], [cantidadCompra], [unidadMedidaId].
   Future<void> distribuirPendiente(
     int pendienteId, {
@@ -304,6 +304,56 @@ class ShoppingService {
       body: jsonEncode(body),
     );
     if (response.statusCode != 201 && response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = decoded['data'] as Map<String, dynamic>;
+    return ListaCompraCabecera.fromJson(data);
+  }
+
+  /// Actualiza la cabecera de una lista (título y/o fecha prevista).
+  /// [clearFechaPrevista] true envía fecha_prevista: null para quitar la fecha.
+  Future<ListaCompraCabecera> updateLista(int id, {String? titulo, String? fechaPrevista, bool clearFechaPrevista = false}) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    final uri = Uri.parse('$_baseUrl/shopping/listas/$id');
+    final body = <String, dynamic>{};
+    if (titulo != null) body['titulo'] = titulo;
+    if (fechaPrevista != null) body['fecha_prevista'] = fechaPrevista;
+    if (clearFechaPrevista) body['fecha_prevista'] = null;
+    if (body.isEmpty) {
+      throw Exception('Indica titulo o fecha_prevista.');
+    }
+    final response = await http.patch(
+      uri,
+      headers: _authHeaders(token),
+      body: jsonEncode(body),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = decoded['data'] as Map<String, dynamic>;
+    return ListaCompraCabecera.fromJson(data);
+  }
+
+  /// Obtiene una lista de compra existente para el proveedor o la crea si el proveedor
+  /// tiene "crear lista automáticamente" activado (ej. Mercadona). Si el proveedor no
+  /// tiene el flag (ej. Carrefour), el backend responde 422 y no se crea lista.
+  Future<ListaCompraCabecera> getOrCreateListaForProveedor(int proveedorId) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    final uri = Uri.parse('$_baseUrl/shopping/listas/obtener-o-crear-por-proveedor');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(token),
+      body: jsonEncode({'proveedor_id': proveedorId}),
+    );
+    if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));
     }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
@@ -595,6 +645,10 @@ class ProductoSimple {
   final int? unidadMedidaId;
   /// Abreviatura de la unidad de medida (p. ej. "kg", "l") cuando el API la envía.
   final String? unidadMedidaAbreviatura;
+  /// Proveedor principal del producto (ej. Mercadona). Null si no tiene.
+  final int? proveedorId;
+  /// Si true, al elegir este producto se puede obtener/crear automáticamente una lista para el proveedor.
+  final bool crearListaAutomatica;
 
   const ProductoSimple({
     required this.id,
@@ -604,6 +658,8 @@ class ProductoSimple {
     required this.ingredienteId,
     this.unidadMedidaId,
     this.unidadMedidaAbreviatura,
+    this.proveedorId,
+    this.crearListaAutomatica = false,
   });
 
   factory ProductoSimple.fromJson(Map<String, dynamic> json) {
@@ -612,6 +668,7 @@ class ProductoSimple {
     if (um is Map<String, dynamic>) {
       abrev = um['abreviatura'] as String?;
     }
+    final provId = json['proveedor_id'];
     return ProductoSimple(
       id: json['id'] as int,
       nombre: json['nombre'] as String,
@@ -620,6 +677,8 @@ class ProductoSimple {
       ingredienteId: json['ingrediente_id'] as int,
       unidadMedidaId: json['unidad_medida_id'] as int?,
       unidadMedidaAbreviatura: abrev,
+      proveedorId: provId is int ? provId : (provId is num ? provId.toInt() : null),
+      crearListaAutomatica: json['crear_lista_automatica'] == true,
     );
   }
 

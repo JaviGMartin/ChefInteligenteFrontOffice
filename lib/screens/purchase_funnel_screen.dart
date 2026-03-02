@@ -5,7 +5,7 @@ import '../models/pendiente_compra.dart';
 import '../services/shopping_service.dart';
 import '../widgets/main_layout.dart';
 
-/// Pantalla del embudo de compra: ingredientes pendientes de asignar a una lista.
+/// Pantalla de Ingredientes a productos: ingredientes pendientes de asignar a una lista.
 /// Swipe derecha = "Añadir rápido" a la lista por defecto. Tap = modal para elegir lista (y opcionalmente marca/supermercado).
 class PurchaseFunnelScreen extends StatefulWidget {
   const PurchaseFunnelScreen({super.key});
@@ -108,7 +108,7 @@ class _PurchaseFunnelScreenState extends State<PurchaseFunnelScreen> {
   @override
   Widget build(BuildContext context) {
     return MainLayout(
-      title: 'Embudo de compra',
+      title: 'Ingredientes a productos',
       child: RefreshIndicator(
         onRefresh: () async {
           _refresh();
@@ -157,7 +157,7 @@ class _PurchaseFunnelScreenState extends State<PurchaseFunnelScreen> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'No hay ingredientes en el embudo',
+                        'No hay ingredientes en Ingredientes a productos',
                         style: Theme.of(context).textTheme.titleMedium,
                         textAlign: TextAlign.center,
                       ),
@@ -224,7 +224,7 @@ class _PurchaseFunnelScreenState extends State<PurchaseFunnelScreen> {
   }
 }
 
-class _ModalSeleccionLista extends StatelessWidget {
+class _ModalSeleccionLista extends StatefulWidget {
   const _ModalSeleccionLista({
     required this.pendiente,
     required this.listas,
@@ -234,7 +234,132 @@ class _ModalSeleccionLista extends StatelessWidget {
   final List<ListaCompraCabecera> listas;
 
   @override
+  State<_ModalSeleccionLista> createState() => _ModalSeleccionListaState();
+}
+
+class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
+  late List<ListaCompraCabecera> _listas;
+
+  @override
+  void initState() {
+    super.initState();
+    _listas = List<ListaCompraCabecera>.from(widget.listas);
+  }
+
+  Future<void> _crearLista() async {
+    final tituloController = TextEditingController();
+    final fechaController = TextEditingController();
+    DateTime? fechaSeleccionada;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Nueva lista de compra'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: tituloController,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Proveedor o nombre',
+                        hintText: 'Ej: Mercadona, Carrefour',
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: fechaController,
+                      readOnly: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Fecha prevista',
+                        hintText: 'Opcional',
+                        suffixIcon: Icon(Icons.calendar_today),
+                      ),
+                      onTap: () async {
+                        final fecha = await showDatePicker(
+                          context: context,
+                          initialDate: DateTime.now(),
+                          firstDate: DateTime.now(),
+                          lastDate: DateTime.now().add(const Duration(days: 365)),
+                        );
+                        if (fecha != null) {
+                          setDialogState(() {
+                            fechaSeleccionada = fecha;
+                            fechaController.text =
+                                '${fecha.day.toString().padLeft(2, '0')}/${fecha.month.toString().padLeft(2, '0')}/${fecha.year}';
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    if (tituloController.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('El nombre no puede estar vacío.')),
+                      );
+                      return;
+                    }
+                    Navigator.pop(dialogContext, true);
+                  },
+                  child: const Text('Crear'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == true && tituloController.text.trim().isNotEmpty && mounted) {
+      try {
+        final fechaPrevista = fechaSeleccionada != null
+            ? '${fechaSeleccionada!.year}-${fechaSeleccionada!.month.toString().padLeft(2, '0')}-${fechaSeleccionada!.day.toString().padLeft(2, '0')}'
+            : null;
+        final shopping = ShoppingService();
+        await shopping.crearLista(tituloController.text.trim(), fechaPrevista: fechaPrevista);
+        final nuevasListas = await shopping.getListas();
+        setState(() {
+          _listas = nuevasListas;
+        });
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Lista "${tituloController.text.trim()}" creada.'), behavior: SnackBarBehavior.floating),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(e.toString().replaceFirst('Exception: ', '')),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    }
+
+    tituloController.dispose();
+    fechaController.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final pendiente = widget.pendiente;
     return DraggableScrollableSheet(
       initialChildSize: 0.5,
       minChildSize: 0.3,
@@ -271,21 +396,32 @@ class _ModalSeleccionLista extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Expanded(
-                child: listas.isEmpty
+                child: _listas.isEmpty
                     ? Center(
-                        child: Text(
-                          'No tienes listas activas. Crea una en la web.',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                          textAlign: TextAlign.center,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'No tienes listas activas.',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.icon(
+                              onPressed: _crearLista,
+                              icon: const Icon(Icons.add),
+                              label: const Text('Crear lista'),
+                            ),
+                          ],
                         ),
                       )
                     : ListView.builder(
                         controller: scrollController,
-                        itemCount: listas.length,
+                        itemCount: _listas.length,
                         itemBuilder: (context, index) {
-                          final lista = listas[index];
+                          final lista = _listas[index];
                           return ListTile(
                             leading: Icon(Icons.list_alt, color: Theme.of(context).colorScheme.primary),
                             title: Text(lista.titulo),
@@ -295,16 +431,6 @@ class _ModalSeleccionLista extends StatelessWidget {
                         },
                       ),
               ),
-              if (listas.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    'Elige marca/supermercado en la web si necesitas asignar un producto concreto.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                ),
             ],
           ),
         );

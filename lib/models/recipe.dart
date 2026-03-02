@@ -201,6 +201,9 @@ class Recipe {
   /// Elaboraciones (sub-procesos) con pasos. Para modo chef y visualización estructurada.
   final List<ElaboracionRecipe>? elaboraciones;
 
+  /// Valoraciones aprobadas (solo en detalle de receta desde API show). Incluye puntuación, comentario y nombre de usuario.
+  final List<ValoracionRecipe>? valoraciones;
+
   /// Alias de [userId] para compatibilidad con auditoría (identificador del autor).
   int? get authorId => userId;
 
@@ -233,6 +236,7 @@ class Recipe {
     this.ingredientesFaltantes,
     this.estadoDisponibilidadCompleta,
     this.elaboraciones,
+    this.valoraciones,
   });
 
   factory Recipe.fromJson(Map<String, dynamic> json) {
@@ -273,7 +277,14 @@ class Recipe {
               .toList(),
       estadoDisponibilidadCompleta: json['estado_disponibilidad_completa'] as String?,
       elaboraciones: _parseElaboraciones(json['elaboraciones']),
+      valoraciones: _parseValoraciones(json['valoraciones']),
     );
+  }
+
+  static List<ValoracionRecipe>? _parseValoraciones(dynamic v) {
+    if (v == null || v is! List) return null;
+    final list = v.whereType<Map<String, dynamic>>().map(ValoracionRecipe.fromJson).toList();
+    return list.isEmpty ? null : list;
   }
 
   Map<String, dynamic> toJson() {
@@ -307,6 +318,40 @@ class Recipe {
             }).toList(),
       if (estadoDisponibilidadCompleta != null)
         'estado_disponibilidad_completa': estadoDisponibilidadCompleta,
+      if (valoraciones != null) 'valoraciones': valoraciones!.map((e) => e.toJson()).toList(),
+    };
+  }
+}
+
+/// Valoración aprobada de una receta (comentario público).
+class ValoracionRecipe {
+  final int puntuacion;
+  final String? comentario;
+  final String userName;
+  final String? updatedAt;
+
+  const ValoracionRecipe({
+    required this.puntuacion,
+    this.comentario,
+    required this.userName,
+    this.updatedAt,
+  });
+
+  factory ValoracionRecipe.fromJson(Map<String, dynamic> json) {
+    return ValoracionRecipe(
+      puntuacion: (json['puntuacion'] as num?)?.toInt() ?? 0,
+      comentario: json['comentario'] as String?,
+      userName: (json['user_name'] as String?) ?? 'Anónimo',
+      updatedAt: json['updated_at'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'puntuacion': puntuacion,
+      if (comentario != null) 'comentario': comentario,
+      'user_name': userName,
+      if (updatedAt != null) 'updated_at': updatedAt,
     };
   }
 }

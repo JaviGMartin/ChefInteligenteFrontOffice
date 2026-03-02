@@ -6,8 +6,8 @@ import '../services/hogar_service.dart';
 import '../services/recipe_service.dart';
 import '../services/shopping_service.dart';
 
-/// Estado global del flujo Cocina → Embudo → Compras.
-/// Centraliza planificador (recetas con semáforos) y pendientes (embudo).
+/// Estado global del flujo Cocina → Ingredientes a productos → Compras.
+/// Centraliza planificador (recetas con semáforos) y pendientes (Ingredientes a productos).
 /// Al marcar una compra como procesada, se debe llamar [refreshAfterPurchase]
 /// para actualizar semáforos.
 class KitchenState extends ChangeNotifier {
@@ -53,7 +53,7 @@ class KitchenState extends ChangeNotifier {
     }
   }
 
-  /// Carga los pendientes del embudo.
+  /// Carga los pendientes de Ingredientes a productos.
   Future<void> loadPendientes() async {
     _isLoadingPendientes = true;
     _pendientesError = null;

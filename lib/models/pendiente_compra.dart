@@ -1,4 +1,4 @@
-/// Ítem del embudo de compra (pendientes_compra): ingrediente pendiente de asignar a lista.
+/// Ítem de Ingredientes a productos (pendientes_compra): ingrediente pendiente de asignar a lista.
 class PendienteCompra {
   final int id;
   final int userId;

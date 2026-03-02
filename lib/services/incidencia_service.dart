@@ -45,9 +45,12 @@ class IncidenciaService {
   }
 
   /// GET /api/incidencias — listar incidencias/propuestas del usuario.
-  Future<List<Incidencia>> fetchMisIncidencias() async {
+  /// [archived] true = solo archivadas, false/omitido = solo activas.
+  Future<List<Incidencia>> fetchMisIncidencias({bool archived = false}) async {
     final token = await _getToken();
-    final uri = Uri.parse('$_baseUrl/incidencias');
+    final uri = Uri.parse('$_baseUrl/incidencias').replace(
+      queryParameters: archived ? {'archived': '1'} : {},
+    );
     final response = await http.get(uri, headers: _authHeaders(token));
 
     if (response.statusCode != 200) {
@@ -101,5 +104,90 @@ class IncidenciaService {
       throw Exception('No se devolvió la incidencia creada.');
     }
     return Incidencia.fromJson(data);
+  }
+
+  /// GET /api/incidencias/unread-count — cuenta para badge (respuestas del equipo).
+  Future<int> fetchUnreadCount() async {
+    try {
+      final token = await _getToken();
+      final uri = Uri.parse('$_baseUrl/incidencias/unread-count');
+      final response = await http.get(uri, headers: _authHeaders(token));
+      if (response.statusCode != 200) return 0;
+      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+      final c = decoded['count'];
+      return (c is num) ? c.toInt() : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// PATCH /api/incidencias/{id}/estado — actualizar estado (resuelto, cerrado).
+  Future<Incidencia> updateEstado(int id, String estado) async {
+    final token = await _getToken();
+    final uri = Uri.parse('$_baseUrl/incidencias/$id/estado');
+    final response = await http.patch(
+      uri,
+      headers: _authHeaders(token),
+      body: jsonEncode({'estado': estado}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = decoded['data'] as Map<String, dynamic>?;
+    if (data == null) throw Exception('No se devolvió la incidencia.');
+    return Incidencia.fromJson(data);
+  }
+
+  /// PATCH /api/incidencias/{id}/archive — archivar incidencia.
+  Future<void> archivarIncidencia(int id) async {
+    final token = await _getToken();
+    final uri = Uri.parse('$_baseUrl/incidencias/$id/archive');
+    final response = await http.patch(uri, headers: _authHeaders(token));
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+  }
+
+  /// GET /api/incidencias/{id} — una incidencia (para refrescar detalle).
+  Future<Incidencia> getIncidencia(int id) async {
+    final token = await _getToken();
+    final uri = Uri.parse('$_baseUrl/incidencias/$id');
+    final response = await http.get(uri, headers: _authHeaders(token));
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = decoded['data'] as Map<String, dynamic>?;
+    if (data == null) throw Exception('Incidencia no encontrada.');
+    return Incidencia.fromJson(data);
+  }
+
+  /// POST /api/incidencias/{id}/mensajes — añadir respuesta del usuario.
+  Future<Incidencia> addMensaje(int id, String mensaje) async {
+    final token = await _getToken();
+    final uri = Uri.parse('$_baseUrl/incidencias/$id/mensajes');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(token),
+      body: jsonEncode({'mensaje': mensaje}),
+    );
+    if (response.statusCode != 201) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = decoded['data'] as Map<String, dynamic>?;
+    if (data == null) throw Exception('No se devolvió la incidencia.');
+    return Incidencia.fromJson(data);
+  }
+
+  /// DELETE /api/incidencias/{id} — eliminar incidencia.
+  Future<void> eliminarIncidencia(int id) async {
+    final token = await _getToken();
+    final uri = Uri.parse('$_baseUrl/incidencias/$id');
+    final response = await http.delete(uri, headers: _authHeaders(token));
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
   }
 }

@@ -10,14 +10,21 @@ import '../theme/app_colors.dart';
 import '../widgets/main_layout.dart';
 import '../widgets/recipe_semaforo.dart';
 import '../widgets/recipe_status_badge.dart';
+import '../widgets/star_rating.dart';
 import 'edit_recipe_screen.dart';
 import 'kitchen_funnel_screen.dart';
 
 class RecipeDetailScreen extends StatefulWidget {
-  const RecipeDetailScreen({super.key, required this.recipe, this.fromPlanificador = false});
+  const RecipeDetailScreen({
+    super.key,
+    required this.recipe,
+    this.fromPlanificador = false,
+    this.scrollToComments = false,
+  });
 
   final Recipe recipe;
   final bool fromPlanificador;
+  final bool scrollToComments;
 
   @override
   State<RecipeDetailScreen> createState() => _RecipeDetailScreenState();
@@ -26,13 +33,12 @@ class RecipeDetailScreen extends StatefulWidget {
 class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
   late Recipe _recipe;
   bool _loadingFullRecipe = false;
+  final GlobalKey _commentsSectionKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
     _recipe = widget.recipe;
-    // Siempre cargar receta completa para tener elaboraciones y datos frescos
-    // (el index no incluye elaboraciones; el show sí).
     _loadFullRecipe();
   }
 
@@ -46,6 +52,14 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
           _recipe = full;
           _loadingFullRecipe = false;
         });
+        if (widget.scrollToComments) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final ctx = _commentsSectionKey.currentContext;
+            if (ctx != null && mounted) {
+              Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 400), curve: Curves.easeInOut);
+            }
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -150,7 +164,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
     }
   }
 
-  /// Añade la receta al planificador (sin enviar ingredientes al embudo; el usuario usa el botón en Cocina).
+  /// Añade la receta al planificador (sin enviar ingredientes a Ingredientes a productos; el usuario usa el botón en Cocina).
   Future<void> _anadirALaSemana(BuildContext context) async {
     try {
       await RecipeService().guardarEnPlanificador(_recipe.id);
@@ -159,7 +173,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text(
-              'Añadida al planificador. En Cocina puedes enviar los ingredientes faltantes al embudo.',
+              'Añadida al planificador. En Cocina puedes enviar los ingredientes faltantes a Ingredientes a productos.',
             ),
             backgroundColor: AppColors.brandGreen,
             behavior: SnackBarBehavior.floating,
@@ -198,7 +212,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text(
-              'Ingredientes añadidos al embudo. La receta queda en tu lista de decisión.',
+              'Ingredientes añadidos a Ingredientes a productos. La receta queda en tu lista de decisión.',
             ),
             backgroundColor: AppColors.brandGreen,
             behavior: SnackBarBehavior.floating,
@@ -231,6 +245,77 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
         );
       }
     }
+  }
+
+  Widget _buildComentariosSection(BuildContext context) {
+    final recipe = _recipe;
+    final valoraciones = recipe.valoraciones ?? [];
+    final hasRating = recipe.averageRating != null && recipe.averageRating! > 0;
+    return Column(
+      key: _commentsSectionKey,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 24),
+        const Divider(),
+        Text(
+          'Valoraciones y comentarios',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        if (hasRating)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: StarRating(rating: recipe.averageRating, size: 24),
+          ),
+        if (valoraciones.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              hasRating ? 'Aún no hay comentarios aprobados.' : 'Aún no hay valoraciones.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          )
+        else
+          ...valoraciones.map((v) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Card(
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          StarRating(rating: v.puntuacion.toDouble(), size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            v.userName,
+                            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ),
+                      if (v.comentario != null && v.comentario!.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          v.comentario!,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+      ],
+    );
   }
 
   Future<void> _confirmarBorrar(BuildContext context) async {
@@ -376,7 +461,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                   children: [
                     if (recipe.tiempoPreparacion != null)
                       Chip(
-                        avatar: const Icon(Icons.schedule, size: 18, color: Colors.white70),
+                        avatar: Icon(Icons.schedule, size: 18, color: Theme.of(context).colorScheme.primary),
                         label: Text('${recipe.tiempoPreparacion} min'),
                       ),
                     if (recipe.dificultad != null)
@@ -408,7 +493,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                       runSpacing: 4,
                       children: recipe.herramientas!
                           .map((h) => Chip(
-                                avatar: const Icon(Icons.restaurant_rounded, size: 18, color: Colors.white70),
+                                avatar: Icon(Icons.restaurant_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
                                 label: Text(h),
                               ))
                           .toList(),
@@ -509,6 +594,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                         )),
                   ]),
             ],
+            _buildComentariosSection(context),
             const SizedBox(height: 24),
             if (_canEdit(enPlanificador))
               Padding(
@@ -582,7 +668,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
               FilledButton.tonalIcon(
                 onPressed: () => _enviarAPendientes(context),
                 icon: const Icon(Icons.shopping_cart_outlined),
-                label: const Text('Solo enviar faltantes al embudo'),
+                label: const Text('Solo enviar faltantes a Ingredientes a productos'),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
@@ -605,7 +691,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
               Text(
                 RecipeSemaforo.texto(recipe) == '¡Listo para cocinar!'
                     ? 'Tienes todos los ingredientes para esta receta.'
-                    : 'Añade los ingredientes que te faltan al embudo de compra para tu hogar activo.',
+                    : 'Añade los ingredientes que te faltan a Ingredientes a productos para tu hogar activo.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: RecipeSemaforo.texto(recipe) == '¡Listo para cocinar!'
                           ? Theme.of(context).colorScheme.primary

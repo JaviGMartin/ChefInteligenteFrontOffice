@@ -17,6 +17,7 @@ import '../screens/recipe_list_screen.dart';
 import '../screens/kitchen_funnel_screen.dart';
 import '../screens/support_screen.dart';
 import '../screens/team_management_screen.dart';
+import '../services/incidencia_service.dart';
 import '../theme/app_colors.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
@@ -30,6 +31,7 @@ class AppDrawer extends StatefulWidget {
 class _AppDrawerState extends State<AppDrawer> {
   final ImagePicker _imagePicker = ImagePicker();
   Future<HogaresResult>? _hogaresFuture;
+  Future<int>? _incidenciasUnreadFuture;
   bool _cambiandoHogar = false;
 
   @override
@@ -37,6 +39,7 @@ class _AppDrawerState extends State<AppDrawer> {
     super.initState();
     AuthService().fetchUser(forceRefresh: true);
     _hogaresFuture = HogarService().fetchHogares();
+    _incidenciasUnreadFuture = IncidenciaService().fetchUnreadCount();
     hogaresDataChangedNotifier.addListener(_onHogaresDataChanged);
   }
 
@@ -428,7 +431,7 @@ class _AppDrawerState extends State<AppDrawer> {
               ),
               ListTile(
                 leading: Icon(Icons.shopping_cart_outlined, color: primary),
-                title: Text('Embudo de compra', style: TextStyle(color: primary)),
+                title: Text('Ingredientes a productos', style: TextStyle(color: primary)),
                 onTap: () {
                   Navigator.of(context).pop();
                   Navigator.of(context).pushReplacement(
@@ -459,7 +462,7 @@ class _AppDrawerState extends State<AppDrawer> {
           ),
           ListTile(
             leading: Icon(LucideIcons.filter, color: primary),
-            title: Text('Planificador (Embudo)', style: TextStyle(color: primary)),
+            title: Text('Planificador', style: TextStyle(color: primary)),
             onTap: () {
               Navigator.of(context).pop();
               Navigator.of(context).pushReplacement(
@@ -468,13 +471,29 @@ class _AppDrawerState extends State<AppDrawer> {
             },
           ),
           ListTile(
-            leading: Icon(LucideIcons.messageCircle, color: primary),
+            leading: FutureBuilder<int>(
+              future: _incidenciasUnreadFuture,
+              builder: (context, snapshot) {
+                final count = snapshot.data ?? 0;
+                final icon = Icon(LucideIcons.messageCircle, color: primary);
+                if (count > 0) {
+                  return Badge(
+                    label: Text('$count'),
+                    backgroundColor: Colors.orange,
+                    child: icon,
+                  );
+                }
+                return icon;
+              },
+            ),
             title: Text('Ayuda y soporte', style: TextStyle(color: primary)),
             onTap: () {
               Navigator.of(context).pop();
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const SupportScreen()),
-              );
+              ).then((_) {
+                if (mounted) setState(() => _incidenciasUnreadFuture = IncidenciaService().fetchUnreadCount());
+              });
             },
           ),
           const Spacer(),

@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/recipe.dart';
+import '../screens/valorar_receta_screen.dart';
 import '../services/alarma_notification_service.dart';
+import '../services/auth_service.dart';
 import '../services/recipe_service.dart';
 import '../state/kitchen_state.dart';
 import '../theme/app_colors.dart';
@@ -37,10 +39,11 @@ String formatTiempoPaso(PasoElaboracionRecipe paso) {
 
 /// Paso aplanado para la UI (elaboracion + paso).
 class _PasoPlano {
+  final int elaboracionId;
   final String elaboracionTitulo;
   final PasoElaboracionRecipe paso;
 
-  _PasoPlano(this.elaboracionTitulo, this.paso);
+  _PasoPlano(this.elaboracionId, this.elaboracionTitulo, this.paso);
 }
 
 /// Pantalla Modo Chef: elaboración paso a paso.
@@ -56,7 +59,11 @@ class ElaboracionScreen extends StatefulWidget {
 }
 
 class _ElaboracionScreenState extends State<ElaboracionScreen> {
-  final Set<int> _ingredientesMarcados = {};
+  /// Claves por uso: "elabId_pasoId_ingIndex" para no colisionar entre elaboraciones; "r_ingredienteId" para lista global.
+  final Set<String> _ingredientesMarcados = {};
+
+  String _keyIngredienteUso(int pasoId, int ingIndex, {int? elaboracionId}) =>
+      elaboracionId != null ? '${elaboracionId}_${pasoId}_$ingIndex' : '${pasoId}_$ingIndex';
   bool _marcandoCocinada = false;
   Recipe? _recipe;
   int _pasoActual = 0;
@@ -135,7 +142,7 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
     final planos = <_PasoPlano>[];
     for (final elab in elaboraciones) {
       for (final paso in elab.pasos) {
-        planos.add(_PasoPlano(elab.titulo, paso));
+        planos.add(_PasoPlano(elab.id, elab.titulo, paso));
       }
     }
     return planos;
@@ -267,6 +274,16 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
           behavior: SnackBarBehavior.floating,
         ),
       );
+      final currentUserId = AuthService.userNotifier.value?.id;
+      final esRecetaDelUsuario = recipe.userId == currentUserId;
+      if (!esRecetaDelUsuario) {
+        await Navigator.of(context).push<bool>(
+          MaterialPageRoute(
+            builder: (context) => ValorarRecetaScreen(recipe: recipe),
+          ),
+        );
+        if (!mounted) return;
+      }
       Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {
@@ -344,25 +361,33 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
   Widget _buildVistaResumenInicial(BuildContext context) {
     return MainLayout(
       title: recipe.titulo,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildResumenInicialIngredientes(context),
-            const SizedBox(height: 24),
-            _buildResumenInicialPasos(context),
-            const SizedBox(height: 32),
-            FilledButton.icon(
-              onPressed: () => setState(() => _mostrandoResumenInicial = false),
-              icon: const Icon(Icons.play_arrow, size: 24),
-              label: const Text('Empezar elaboración'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildResumenInicialIngredientes(context),
+                  const SizedBox(height: 24),
+                  _buildResumenInicialPasos(context),
+                  const SizedBox(height: 32),
+                  FilledButton.icon(
+                    onPressed: () => setState(() => _mostrandoResumenInicial = false),
+                    icon: const Icon(Icons.play_arrow, size: 24),
+                    label: const Text('Empezar elaboración'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -678,6 +703,26 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
     return list;
   }
 
+  /// Usos de ingredientes (elaboración + paso + índice + ing). Cada aparición en un paso es un uso.
+  List<({int elaboracionId, int pasoId, int ingIndex, Ingredient ing})> _usosIngredientesDeElaboracion(ElaboracionRecipe elab) {
+    final list = <({int elaboracionId, int pasoId, int ingIndex, Ingredient ing})>[];
+    for (final paso in elab.pasos) {
+      for (final entry in paso.ingredientes.asMap().entries) {
+        list.add((elaboracionId: elab.id, pasoId: paso.id, ingIndex: entry.key, ing: entry.value));
+      }
+    }
+    return list;
+  }
+
+  /// Usos de ingredientes de varias elaboraciones (p. ej. grupo actual).
+  List<({int elaboracionId, int pasoId, int ingIndex, Ingredient ing})> _usosIngredientesDeGrupo(List<ElaboracionRecipe> grupo) {
+    final list = <({int elaboracionId, int pasoId, int ingIndex, Ingredient ing})>[];
+    for (final elab in grupo) {
+      list.addAll(_usosIngredientesDeElaboracion(elab));
+    }
+    return list;
+  }
+
   /// Panel con lista de pasos (check en finalizados) e ingredientes (check utilizados). Solo en ventana de resumen.
   /// [elaboracion] si no es null: resumen por elaboración (solo pasos e ingredientes de esa elaboración).
   Widget _buildPanelProgreso(BuildContext context, {ElaboracionRecipe? elaboracion}) {
@@ -685,9 +730,11 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
     int completados;
     Widget listaPasos;
     List<Ingredient> ingredientesParaMostrar;
+    List<({int elaboracionId, int pasoId, int ingIndex, Ingredient ing})>? usosParaMostrar;
 
     if (_usaElaboracionesParalelas && elaboracion != null) {
       final e = elaboracion;
+      usosParaMostrar = _usosIngredientesDeElaboracion(e);
       final pasoIdx = _pasoPorElaboracion[e.id] ?? 0;
       totalPasos = e.pasos.length;
       completados = pasoIdx.clamp(0, e.pasos.length);
@@ -743,6 +790,7 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
       ingredientesParaMostrar = _ingredientesDeElaboracion(e);
     } else if (_usaElaboracionesParalelas) {
       final grupo = _elaboracionesGrupoActual;
+      usosParaMostrar = _usosIngredientesDeGrupo(grupo);
       totalPasos = grupo.fold<int>(0, (s, e) => s + e.pasos.length);
       completados = grupo.fold<int>(
         0,
@@ -805,6 +853,11 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
       final pasos = _pasosPlanos;
       totalPasos = pasos.length;
       completados = _pasoActual;
+      usosParaMostrar = pasos
+          .expand((plano) => plano.paso.ingredientes.asMap().entries.map(
+                (e) => (elaboracionId: plano.elaboracionId, pasoId: plano.paso.id, ingIndex: e.key, ing: e.value),
+              ))
+          .toList();
       ingredientesParaMostrar = recipe.ingredientes;
       listaPasos = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -918,12 +971,17 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
                   ),
             ),
             const SizedBox(height: 4),
-            if (ingredientesParaMostrar.isEmpty)
+            if ((usosParaMostrar == null || usosParaMostrar.isEmpty) &&
+                ingredientesParaMostrar.isEmpty)
               Text(
                 'Sin ingredientes.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
+              )
+            else if (usosParaMostrar != null && usosParaMostrar.isNotEmpty)
+              ...usosParaMostrar.map(
+                (u) => _buildIngredienteCheck(context, u.ing, elaboracionId: u.elaboracionId, pasoId: u.pasoId, ingIndex: u.ingIndex),
               )
             else
               ...ingredientesParaMostrar.map((ing) => _buildIngredienteCheck(context, ing)),
@@ -1091,13 +1149,18 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
     final enUltimoPaso = pasoIdx >= pasos.length;
     final pasoActual = pasoIdx < pasos.length ? pasos[pasoIdx] : null;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (enUltimoPaso) _buildPanelProgreso(context, elaboracion: elab),
-          if (pasoActual != null) ...[
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (enUltimoPaso) _buildPanelProgreso(context, elaboracion: elab),
+                if (pasoActual != null) ...[
             Row(
               children: [
                 Chip(
@@ -1165,7 +1228,9 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
                     ),
               ),
               const SizedBox(height: 8),
-              ...pasoActual.ingredientes.map((ing) => _buildIngredienteCheck(context, ing)),
+              ...pasoActual.ingredientes.asMap().entries.map(
+                (e) => _buildIngredienteCheck(context, e.value, elaboracionId: elaboracionId, pasoId: pasoActual.id, ingIndex: e.key),
+              ),
             ],
             const SizedBox(height: 24),
             Row(
@@ -1184,6 +1249,27 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
                     ),
                   ),
                 if (pasoIdx > 0) const SizedBox(width: 12),
+                if (pasoIdx == 0 && (_indiceGrupoActual > 0 || _mostrandoResumenInicial == false)) ...[
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          if (_indiceGrupoActual > 0) {
+                            _indiceGrupoActual--;
+                          } else {
+                            _mostrandoResumenInicial = true;
+                          }
+                        });
+                      },
+                      icon: const Icon(Icons.arrow_back),
+                      label: Text(_indiceGrupoActual > 0 ? 'Volver al grupo anterior' : 'Volver al resumen'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: () {
@@ -1192,8 +1278,8 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
                         _pasoPorElaboracion[elaboracionId] = nuevoIdx;
                         if (nuevoIdx >= pasos.length) {
                           for (final paso in elab.pasos) {
-                            for (final ing in paso.ingredientes) {
-                              _ingredientesMarcados.add(ing.id);
+                            for (final entry in paso.ingredientes.asMap().entries) {
+                              _ingredientesMarcados.add(_keyIngredienteUso(paso.id, entry.key, elaboracionId: elaboracionId));
                             }
                           }
                         }
@@ -1217,9 +1303,21 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
                     color: Theme.of(context).colorScheme.primary,
                   ),
             ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => setState(() => _pasoPorElaboracion[elaboracionId] = pasos.length - 1),
+              icon: const Icon(Icons.arrow_back, size: 20),
+              label: const Text('Revisar último paso'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
           ],
         ],
-      ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1262,12 +1360,17 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
 
     return MainLayout(
       title: recipe.titulo,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (enUltimoPaso) _buildPanelProgreso(context),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (enUltimoPaso) _buildPanelProgreso(context),
             if (pasoActual != null) ...[
               Text(
                 pasoActual.elaboracionTitulo,
@@ -1344,7 +1447,9 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
                       ),
                 ),
                 const SizedBox(height: 8),
-                ...pasoActual.paso.ingredientes.map((ing) => _buildIngredienteCheck(context, ing)),
+                ...pasoActual.paso.ingredientes.asMap().entries.map(
+                  (e) => _buildIngredienteCheck(context, e.value, elaboracionId: pasoActual.elaboracionId, pasoId: pasoActual.paso.id, ingIndex: e.key),
+                ),
               ],
               const SizedBox(height: 24),
               Row(
@@ -1361,6 +1466,18 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
                       ),
                     ),
                   if (_pasoActual > 0) const SizedBox(width: 12),
+                  if (_pasoActual == 0)
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => setState(() => _mostrandoResumenInicial = true),
+                        icon: const Icon(Icons.arrow_back),
+                        label: const Text('Volver al resumen'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                      ),
+                    ),
+                  if (_pasoActual == 0) const SizedBox(width: 12),
                   Expanded(
                     child: FilledButton.icon(
                       onPressed: () => setState(() => _pasoActual++),
@@ -1399,8 +1516,11 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
               ),
             ],
           ],
+                ),
+              ),
+            );
+          },
         ),
-      ),
     );
   }
 
@@ -1439,9 +1559,18 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
     );
   }
 
-  Widget _buildIngredienteCheck(BuildContext context, Ingredient ing) {
-    final id = ing.id;
-    final marcado = _ingredientesMarcados.contains(id);
+  /// [elaboracionId], [pasoId] y [ingIndex]: si se pasan, la clave es por uso (elab+paso+índice). Si no, por ingrediente en lista global.
+  Widget _buildIngredienteCheck(
+    BuildContext context,
+    Ingredient ing, {
+    int? elaboracionId,
+    int? pasoId,
+    int? ingIndex,
+  }) {
+    final key = (pasoId != null && ingIndex != null)
+        ? _keyIngredienteUso(pasoId, ingIndex, elaboracionId: elaboracionId)
+        : 'r_${ing.id}';
+    final marcado = _ingredientesMarcados.contains(key);
     final cantidadTexto = ing.cantidad != null && ing.unidadMedida != null
         ? '${ing.cantidad} ${ing.unidadMedida!.abreviatura ?? ing.unidadMedida!.nombre}'
         : '';
@@ -1453,9 +1582,9 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
       onTap: () {
         setState(() {
           if (marcado) {
-            _ingredientesMarcados.remove(id);
+            _ingredientesMarcados.remove(key);
           } else {
-            _ingredientesMarcados.add(id);
+            _ingredientesMarcados.add(key);
           }
         });
       },
@@ -1517,13 +1646,18 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
 
     return MainLayout(
       title: recipe.titulo,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (enResumenFinal) _buildPanelProgreso(context),
-            if (tiempoTotalMin != null && tiempoTotalMin > 0) ...[
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (enResumenFinal) _buildPanelProgreso(context),
+                  if (tiempoTotalMin != null && tiempoTotalMin > 0) ...[
               Text(
                 'Tiempo total: $tiempoTotalMin min',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -1655,8 +1789,11 @@ class _ElaboracionScreenState extends State<ElaboracionScreen> {
               ),
             ),
           ],
+                ),
+              ),
+            );
+          },
         ),
-      ),
     );
   }
 }

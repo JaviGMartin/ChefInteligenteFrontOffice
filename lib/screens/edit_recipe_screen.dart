@@ -10,6 +10,14 @@ import '../widgets/proponer_ingrediente_dialog.dart';
 import '../widgets/recipe_form_models.dart';
 import '../widgets/recipe_status_badge.dart';
 
+/// Indica uso de un ingrediente en una elaboración/paso (para mensajes de validación).
+class _UsoEnPaso {
+  const _UsoEnPaso({required this.elabTitulo, required this.pasoNum, required this.cantidad});
+  final String elabTitulo;
+  final int pasoNum;
+  final double cantidad;
+}
+
 /// Vista de edición de una receta propia (borrador o rechazada).
 /// Permite editar título, tiempo, ingredientes y elaboraciones.
 class EditRecipeScreen extends StatefulWidget {
@@ -52,7 +60,9 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
     return _unidades.where((u) => (u.tipo != null) && ing.tiposUnidad!.contains(u.tipo!)).toList();
   }
   List<IngredienteRowForm> _rows = [];
-  List<ElaboracionForm> _elaboraciones = [];
+  List<BloqueElaboracion> _bloquesElaboracion = [];
+  String? _cantidadErrorMensaje;
+  Set<int> _ingredientesConErrorCantidad = {};
 
   bool get _isLocked => (_fullRecipe ?? widget.recipe).estado == 'pendiente';
 
@@ -106,31 +116,42 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
         unidadMedidaId: ing.unidadMedidaId ?? (_unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : null),
       )).toList();
       if (_rows.isEmpty) _rows.add(IngredienteRowForm(unidadMedidaId: _unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : null));
-      _elaboraciones = (full.elaboraciones ?? []).map((e) {
-        final defaultSegundos = _unidadesTiempo.where((u) => u.factorConversion == 1.0).firstOrNull;
-        final pasos = e.pasos.map((p) {
-          final ts = p.tiempoSegundos;
-          final um = p.tiempoUnidadMedida;
-          final factor = (um?.factorConversion ?? 1.0);
-          final tiempoDisplay = (ts != null && factor > 0)
-              ? (ts / factor).toStringAsFixed(factor >= 1 && factor == factor.roundToDouble() ? 0 : 2)
-              : null;
-          final umId = p.tiempoUnidadMedidaId ??
-              (defaultSegundos?.id ?? (_unidadesTiempo.isNotEmpty ? _unidadesTiempo.first.id : null));
-          return PasoForm(
-            descripcion: p.descripcion,
-            tiempo: tiempoDisplay,
-            temperatura: p.temperatura,
-            ingredientes: p.ingredientes.map((pi) => PasoIngredienteForm(
-              ingredienteId: pi.id,
-              cantidad: pi.cantidad ?? 0,
-              unidadMedidaId: pi.unidadMedidaId ?? (_unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : 1),
-            )).toList(),
-            tiempoUnidadMedidaId: umId,
-          );
+      final elaboracionesList = full.elaboraciones ?? [];
+      final grouped = <int, List<ElaboracionRecipe>>{};
+      for (final e in elaboracionesList) {
+        final g = e.grupoParalelo ?? 1;
+        grouped.putIfAbsent(g, () => []).add(e);
+      }
+      final sortedGroups = grouped.keys.toList()..sort();
+      _bloquesElaboracion = sortedGroups.map((g) {
+        final list = grouped[g]!;
+        final elaboraciones = list.map((e) {
+          final defaultSegundos = _unidadesTiempo.where((u) => u.factorConversion == 1.0).firstOrNull;
+          final pasos = e.pasos.map((p) {
+            final ts = p.tiempoSegundos;
+            final um = p.tiempoUnidadMedida;
+            final factor = (um?.factorConversion ?? 1.0);
+            final tiempoDisplay = (ts != null && factor > 0)
+                ? (ts / factor).toStringAsFixed(factor >= 1 && factor == factor.roundToDouble() ? 0 : 2)
+                : null;
+            final umId = p.tiempoUnidadMedidaId ??
+                (defaultSegundos?.id ?? (_unidadesTiempo.isNotEmpty ? _unidadesTiempo.first.id : null));
+            return PasoForm(
+              descripcion: p.descripcion,
+              tiempo: tiempoDisplay,
+              temperatura: p.temperatura,
+              ingredientes: p.ingredientes.map((pi) => PasoIngredienteForm(
+                ingredienteId: pi.id,
+                cantidad: pi.cantidad ?? 0,
+                unidadMedidaId: pi.unidadMedidaId ?? (_unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes.first.id : 1),
+              )).toList(),
+              tiempoUnidadMedidaId: umId,
+            );
+          }).toList();
+          if (pasos.isEmpty) pasos.add(PasoForm(tiempoUnidadMedidaId: _unidadesTiempo.isNotEmpty ? _unidadesTiempo.first.id : null));
+          return ElaboracionForm(titulo: e.titulo, pasos: pasos);
         }).toList();
-        if (pasos.isEmpty) pasos.add(PasoForm(tiempoUnidadMedidaId: _unidadesTiempo.isNotEmpty ? _unidadesTiempo.first.id : null));
-        return ElaboracionForm(titulo: e.titulo, pasos: pasos);
+        return BloqueElaboracion(elaboraciones);
       }).toList();
       setState(() => _loading = false);
     } catch (e) {
@@ -152,17 +173,19 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
     _tiempoController.dispose();
     _porcionesController.dispose();
     _herramientasController.dispose();
-    for (final e in _elaboraciones) e.dispose();
+    for (final b in _bloquesElaboracion) b.dispose();
     super.dispose();
   }
 
   /// Cantidad ya usada por ingrediente_id en todos los pasos de todas las elaboraciones.
   Map<int, double> _cantidadUsadaPorIngrediente() {
     final mapa = <int, double>{};
-    for (final e in _elaboraciones) {
-      for (final p in e.pasos) {
-        for (final pi in p.ingredientes) {
-          mapa[pi.ingredienteId] = (mapa[pi.ingredienteId] ?? 0) + pi.cantidad;
+    for (final b in _bloquesElaboracion) {
+      for (final e in b.elaboraciones) {
+        for (final p in e.pasos) {
+          for (final pi in p.ingredientes) {
+            mapa[pi.ingredienteId] = (mapa[pi.ingredienteId] ?? 0) + pi.cantidad;
+          }
         }
       }
     }
@@ -183,21 +206,60 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
     return null;
   }
 
-  /// Valida que la suma por ingrediente en pasos no supere la cantidad en receta.
-  String? _validarCantidadesIngredientes() {
+  /// Devuelve dónde se usa cada ingrediente: ingredienteId -> [(elabTítulo, pasoNúmero, cantidad), ...].
+  Map<int, List<_UsoEnPaso>> _usoEnPasosPorIngrediente() {
+    final mapa = <int, List<_UsoEnPaso>>{};
+    for (final bloque in _bloquesElaboracion) {
+      for (final elab in bloque.elaboraciones) {
+        final titulo = elab.tituloController.text.trim();
+        final elabTitulo = titulo.isEmpty ? 'Sin título' : titulo;
+        for (var pIdx = 0; pIdx < elab.pasos.length; pIdx++) {
+          final paso = elab.pasos[pIdx];
+          for (final pi in paso.ingredientes) {
+            mapa.putIfAbsent(pi.ingredienteId, () => []).add(_UsoEnPaso(
+              elabTitulo: elabTitulo,
+              pasoNum: pIdx + 1,
+              cantidad: pi.cantidad,
+            ));
+          }
+        }
+      }
+    }
+    return mapa;
+  }
+
+  static String _fmtCantidad(double c) =>
+      c == c.truncateToDouble() ? c.toInt().toString() : c.toString();
+
+  /// Valida que la suma por ingrediente en pasos cuadre con el total en receta.
+  (String?, Set<int>) _validarCantidadesIngredientes() {
     final usada = _cantidadUsadaPorIngrediente();
+    final usoEnPasos = _usoEnPasosPorIngrediente();
     final recipeIngredientes = _rows
         .where((r) => r.ingredienteId != null && r.cantidad > 0)
         .toList();
+    final idsConError = <int>{};
+    final lineas = <String>[];
     for (final r in recipeIngredientes) {
       final total = r.cantidad;
       final usadaIng = usada[r.ingredienteId!] ?? 0;
+      if (usadaIng == total) continue;
+      final nombre = _ingredientes.where((i) => i.id == r.ingredienteId).map((i) => i.nombre).firstOrNull ?? '—';
+      idsConError.add(r.ingredienteId!);
+      final usos = usoEnPasos[r.ingredienteId!] ?? [];
+      final detalle = usos
+          .map((u) => 'Elaboración «${u.elabTitulo}» - Paso ${u.pasoNum}: ${_fmtCantidad(u.cantidad)}')
+          .join('; ');
       if (usadaIng > total) {
-        final nombre = _ingredientes.where((i) => i.id == r.ingredienteId).map((i) => i.nombre).firstOrNull ?? '—';
-        return '«$nombre»: se usan $usadaIng pero la receta tiene $total';
+        lineas.add(
+            '«$nombre»: total en receta ${_fmtCantidad(total)}, en pasos ${_fmtCantidad(usadaIng)}. Se usa en: $detalle.');
+      } else {
+        lineas.add(
+            '«$nombre»: total en receta ${_fmtCantidad(total)}, en pasos ${_fmtCantidad(usadaIng)}. Se usa en: $detalle.');
       }
     }
-    return null;
+    if (lineas.isEmpty) return (null, {});
+    return (lineas.join(' '), idsConError);
   }
 
   List<Map<String, dynamic>> _buildIngredientesPayload() {
@@ -218,33 +280,41 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
   }
 
   List<Map<String, dynamic>> _buildElaboracionesPayload() {
-    return _elaboraciones.map((e) {
-      final titulo = e.tituloController.text.trim();
-      if (titulo.isEmpty) return null;
-      return {
-        'titulo': titulo,
-        'orden': _elaboraciones.indexOf(e),
-        'pasos': e.pasos.asMap().entries.map((entry) {
-          final p = entry.value;
-          final tiempoValor = double.tryParse(p.tiempoController.text.trim());
-          final umId = p.tiempoUnidadMedidaId ?? (_unidadesTiempo.isNotEmpty ? _unidadesTiempo.first.id : null);
-          return {
-            'descripcion': p.descripcionController.text.trim(),
-            if (tiempoValor != null) ...{
-              'tiempo_valor': tiempoValor,
-              if (umId != null) 'tiempo_unidad_medida_id': umId,
-            },
-            'temperatura': p.temperaturaController.text.trim().isEmpty ? null : p.temperaturaController.text.trim(),
-            'orden': entry.key,
-            'ingredientes': p.ingredientes.map((pi) => {
-              'ingrediente_id': pi.ingredienteId,
-              'cantidad': pi.cantidad,
-              'unidad_medida_id': pi.unidadMedidaId,
-            }).toList(),
-          };
-        }).toList(),
-      };
-    }).whereType<Map<String, dynamic>>().toList();
+    final list = <Map<String, dynamic>>[];
+    int globalOrden = 0;
+    for (int blockIdx = 0; blockIdx < _bloquesElaboracion.length; blockIdx++) {
+      final bloque = _bloquesElaboracion[blockIdx];
+      final grupoParalelo = blockIdx + 1;
+      for (final e in bloque.elaboraciones) {
+        final titulo = e.tituloController.text.trim();
+        if (titulo.isEmpty) continue;
+        list.add({
+          'titulo': titulo,
+          'orden': globalOrden++,
+          'grupo_paralelo': grupoParalelo,
+          'pasos': e.pasos.asMap().entries.map((entry) {
+            final p = entry.value;
+            final tiempoValor = double.tryParse(p.tiempoController.text.trim());
+            final umId = p.tiempoUnidadMedidaId ?? (_unidadesTiempo.isNotEmpty ? _unidadesTiempo.first.id : null);
+            return {
+              'descripcion': p.descripcionController.text.trim(),
+              if (tiempoValor != null) ...{
+                'tiempo_valor': tiempoValor,
+                if (umId != null) 'tiempo_unidad_medida_id': umId,
+              },
+              'temperatura': p.temperaturaController.text.trim().isEmpty ? null : p.temperaturaController.text.trim(),
+              'orden': entry.key,
+              'ingredientes': p.ingredientes.map((pi) => {
+                'ingrediente_id': pi.ingredienteId,
+                'cantidad': pi.cantidad,
+                'unidad_medida_id': pi.unidadMedidaId,
+              }).toList(),
+            };
+          }).toList(),
+        });
+      }
+    }
+    return list;
   }
 
   Future<void> _submit() async {
@@ -256,13 +326,25 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
       );
       return;
     }
-    final errIng = _validarCantidadesIngredientes();
+    final (errIng, idsError) = _validarCantidadesIngredientes();
     if (errIng != null) {
+      setState(() {
+        _cantidadErrorMensaje = errIng;
+        _ingredientesConErrorCantidad = idsError;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ingredientes en elaboraciones: $errIng'), backgroundColor: Colors.red.shade700),
+        SnackBar(
+          content: Text('Cantidades que no cuadran: $errIng'),
+          backgroundColor: Colors.red.shade700,
+          duration: const Duration(seconds: 6),
+        ),
       );
       return;
     }
+    setState(() {
+      _cantidadErrorMensaje = null;
+      _ingredientesConErrorCantidad = {};
+    });
     final tiempo = int.tryParse(_tiempoController.text.trim());
     final porciones = int.tryParse(_porcionesController.text.trim());
     setState(() => _saving = true);
@@ -320,9 +402,16 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                 fontWeight: FontWeight.bold,
               ),
         ),
+        Text(
+          'Un grupo de elaboraciones paralelas son varias que se hacen a la vez (ej. masa y relleno).',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
         const SizedBox(height: 8),
-        ...List.generate(_elaboraciones.length, (eIdx) {
-          final elab = _elaboraciones[eIdx];
+        ...List.generate(_bloquesElaboracion.length, (blockIdx) {
+          final bloque = _bloquesElaboracion[blockIdx];
+          final esGrupoParalelo = bloque.elaboraciones.length > 1;
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
             child: Padding(
@@ -330,126 +419,176 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: elab.tituloController,
-                          readOnly: _isLocked,
-                          decoration: const InputDecoration(
-                            labelText: 'Título (ej: La Masa, El Relleno)',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          onChanged: (_) => setState(() {}),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: _isLocked ? null : () => setState(() {
-                          elab.dispose();
-                          _elaboraciones.removeAt(eIdx);
-                        }),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  ...List.generate(elab.pasos.length, (pIdx) {
-                    final paso = elab.pasos[pIdx];
-                    return Padding(
+                  if (esGrupoParalelo)
+                    Padding(
                       padding: const EdgeInsets.only(bottom: 8.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Row(
                         children: [
-                          Text('Paso ${pIdx + 1}', style: Theme.of(context).textTheme.labelLarge),
-                          const SizedBox(height: 4),
-                          TextField(
-                            controller: paso.descripcionController,
-                            readOnly: _isLocked,
-                            decoration: const InputDecoration(
-                              labelText: 'Descripción',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            maxLines: 2,
-                            onChanged: (_) => setState(() {}),
+                          Icon(Icons.groups, size: 18, color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Grupo de elaboraciones paralelas (${bloque.elaboraciones.length})',
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
                           ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              SizedBox(
-                                width: 80,
-                                child: TextField(
-                                  controller: paso.tiempoController,
-                                  readOnly: _isLocked,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Tiempo',
-                                    border: OutlineInputBorder(),
-                                    isDense: true,
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  onChanged: (_) => setState(() {}),
-                                ),
-                              ),
-                              if (_unidadesTiempo.isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                SizedBox(
-                                  width: 90,
-                                  child: DropdownButtonFormField<int>(
-                                    value: paso.tiempoUnidadMedidaId ?? _unidadesTiempo.first.id,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Unidad',
-                                      border: OutlineInputBorder(),
-                                      isDense: true,
-                                    ),
-                                    items: _unidadesTiempo
-                                        .map((u) => DropdownMenuItem<int>(
-                                              value: u.id,
-                                              child: Text(u.abreviatura ?? u.nombre),
-                                            ))
-                                        .toList(),
-                                    onChanged: _isLocked ? null : (v) => setState(() => paso.tiempoUnidadMedidaId = v),
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: TextField(
-                                  controller: paso.temperaturaController,
-                                  readOnly: _isLocked,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Temperatura (ej: 180°C)',
-                                    border: OutlineInputBorder(),
-                                    isDense: true,
-                                  ),
-                                  onChanged: (_) => setState(() {}),
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.remove_circle_outline, size: 20),
-                                onPressed: _isLocked ? null : (elab.pasos.length > 1
-                                    ? () => setState(() {
-                                          paso.dispose();
-                                          elab.pasos.removeAt(pIdx);
-                                        })
-                                    : null),
-                              ),
-                            ],
+                          const Spacer(),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 20),
+                            tooltip: 'Eliminar bloque',
+                            onPressed: _isLocked ? null : () => setState(() {
+                              bloque.dispose();
+                              _bloquesElaboracion.removeAt(blockIdx);
+                            }),
                           ),
-                          if (_rows.any((r) => r.ingredienteId != null)) ...[
-                            const SizedBox(height: 4),
-                            _buildPasoIngredientes(paso, elab, pIdx),
-                          ],
                         ],
                       ),
+                    ),
+                  ...List.generate(bloque.elaboraciones.length, (eIdx) {
+                    final elab = bloque.elaboraciones[eIdx];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (esGrupoParalelo && eIdx > 0) const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: elab.tituloController,
+                                readOnly: _isLocked,
+                                decoration: InputDecoration(
+                                  labelText: esGrupoParalelo
+                                      ? 'Elaboración ${eIdx + 1} (ej: La Masa, El Relleno)'
+                                      : 'Título (ej: La Masa, El Relleno)',
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              tooltip: bloque.elaboraciones.length > 1
+                                  ? 'Quitar esta elaboración del grupo'
+                                  : 'Eliminar elaboración',
+                              onPressed: _isLocked ? null : () => setState(() {
+                                if (bloque.elaboraciones.length > 1) {
+                                  elab.dispose();
+                                  bloque.elaboraciones.removeAt(eIdx);
+                                } else {
+                                  bloque.dispose();
+                                  _bloquesElaboracion.removeAt(blockIdx);
+                                }
+                              }),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        ...List.generate(elab.pasos.length, (pIdx) {
+                          final paso = elab.pasos[pIdx];
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Paso ${pIdx + 1}', style: Theme.of(context).textTheme.labelLarge),
+                                const SizedBox(height: 4),
+                                TextField(
+                                  controller: paso.descripcionController,
+                                  readOnly: _isLocked,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Descripción',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  maxLines: 2,
+                                  onChanged: (_) => setState(() {}),
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    SizedBox(
+                                      width: 80,
+                                      child: TextField(
+                                        controller: paso.tiempoController,
+                                        readOnly: _isLocked,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Tiempo',
+                                          border: OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                        keyboardType: TextInputType.number,
+                                        onChanged: (_) => setState(() {}),
+                                      ),
+                                    ),
+                                    if (_unidadesTiempo.isNotEmpty) ...[
+                                      const SizedBox(width: 8),
+                                      SizedBox(
+                                        width: 90,
+                                        child: DropdownButtonFormField<int>(
+                                          value: paso.tiempoUnidadMedidaId ?? _unidadesTiempo.first.id,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Unidad',
+                                            border: OutlineInputBorder(),
+                                            isDense: true,
+                                          ),
+                                          items: _unidadesTiempo
+                                              .map((u) => DropdownMenuItem<int>(
+                                                    value: u.id,
+                                                    child: Text(u.abreviatura ?? u.nombre),
+                                                  ))
+                                              .toList(),
+                                          onChanged: _isLocked ? null : (v) => setState(() => paso.tiempoUnidadMedidaId = v),
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: paso.temperaturaController,
+                                        readOnly: _isLocked,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Temperatura (ej: 180°C)',
+                                          border: OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                        onChanged: (_) => setState(() {}),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.remove_circle_outline, size: 20),
+                                      onPressed: _isLocked ? null : (elab.pasos.length > 1
+                                          ? () => setState(() {
+                                                paso.dispose();
+                                                elab.pasos.removeAt(pIdx);
+                                              })
+                                          : null),
+                                    ),
+                                  ],
+                                ),
+                                if (_rows.any((r) => r.ingredienteId != null)) ...[
+                                  const SizedBox(height: 4),
+                                  _buildPasoIngredientes(paso, elab, pIdx),
+                                ],
+                              ],
+                            ),
+                          );
+                        }),
+                        TextButton.icon(
+                          onPressed: _isLocked ? null : () => setState(() => elab.pasos.add(PasoForm(
+                            tiempoUnidadMedidaId: _unidadesTiempo.isNotEmpty ? _unidadesTiempo.first.id : null,
+                          ))),
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Añadir paso'),
+                        ),
+                      ],
                     );
                   }),
                   TextButton.icon(
-                    onPressed: _isLocked ? null : () => setState(() => elab.pasos.add(PasoForm(
-                      tiempoUnidadMedidaId: _unidadesTiempo.isNotEmpty ? _unidadesTiempo.first.id : null,
-                    ))),
+                    onPressed: _isLocked ? null : () => setState(() => bloque.elaboraciones.add(ElaboracionForm())),
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Añadir paso'),
+                    label: Text(esGrupoParalelo ? 'Añadir otra en paralelo' : 'Añadir elaboraciones en paralelo'),
                   ),
                 ],
               ),
@@ -457,10 +596,22 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
           );
         }),
         const SizedBox(height: 8),
-        TextButton.icon(
-          onPressed: _isLocked ? null : () => setState(() => _elaboraciones.add(ElaboracionForm())),
-          icon: const Icon(Icons.add),
-          label: const Text('Añadir elaboración'),
+        Row(
+          children: [
+            TextButton.icon(
+              onPressed: _isLocked ? null : () => setState(() => _bloquesElaboracion.add(BloqueElaboracion([ElaboracionForm()]))),
+              icon: const Icon(Icons.add),
+              label: const Text('Añadir elaboración'),
+            ),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              icon: const Icon(Icons.groups),
+              label: const Text('Añadir Grupo Elaboraciones Paralelas'),
+              onPressed: _isLocked ? null : () => setState(() {
+                _bloquesElaboracion.add(BloqueElaboracion([ElaboracionForm(), ElaboracionForm()]));
+              }),
+            ),
+          ],
         ),
       ],
     );
@@ -519,12 +670,42 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                 SizedBox(
                   width: 60,
                   child: TextFormField(
-                    key: ValueKey('cant-$idx-${pi.ingredienteId}-${pi.cantidad}'),
+                    key: ValueKey('cant-${identityHashCode(paso)}-$idx-${pi.ingredienteId}'),
                     initialValue: pi.cantidad.toString(),
                     readOnly: _isLocked,
-                    decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: _ingredientesConErrorCantidad.contains(pi.ingredienteId)
+                              ? Colors.red.shade700
+                              : Theme.of(context).colorScheme.outline,
+                          width: _ingredientesConErrorCantidad.contains(pi.ingredienteId) ? 2 : 1,
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: _ingredientesConErrorCantidad.contains(pi.ingredienteId)
+                              ? Colors.red.shade700
+                              : Theme.of(context).colorScheme.outline,
+                          width: _ingredientesConErrorCantidad.contains(pi.ingredienteId) ? 2 : 1,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: _ingredientesConErrorCantidad.contains(pi.ingredienteId)
+                              ? Colors.red.shade700
+                              : Theme.of(context).colorScheme.primary,
+                          width: 2,
+                        ),
+                      ),
+                    ),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    onChanged: (s) => setState(() => pi.cantidad = double.tryParse(s.replaceAll(',', '.')) ?? pi.cantidad),
+                    onChanged: _isLocked
+                        ? null
+                        : (s) {
+                            pi.cantidad = double.tryParse(s.replaceAll(',', '.')) ?? pi.cantidad;
+                          },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -731,19 +912,19 @@ class _EditRecipeScreenState extends State<EditRecipeScreen> {
                               onChanged: _isLocked ? null : (v) => setState(() => _dificultad = v),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _herramientasController,
-                            readOnly: _isLocked,
-                            decoration: const InputDecoration(
-                              labelText: 'Herramientas necesarias',
-                              hintText: 'Ej: sartén, batidora, horno (separadas por comas)',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            onChanged: (_) => setState(() {}),
-                          ),
                         ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _herramientasController,
+                        readOnly: _isLocked,
+                        decoration: const InputDecoration(
+                          labelText: 'Herramientas necesarias',
+                          hintText: 'Ej: sartén, batidora, horno (separadas por comas)',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        onChanged: (_) => setState(() {}),
                       ),
                       const SizedBox(height: 24),
                       Row(
@@ -828,10 +1009,33 @@ unidadMedidaId: _unidadesParaIngredientes.isNotEmpty ? _unidadesParaIngredientes
                                 child: TextFormField(
                                   initialValue: row.cantidadText,
                                   readOnly: _isLocked,
-                                  decoration: const InputDecoration(
+                                  decoration: InputDecoration(
                                     labelText: 'Cant.',
-                                    border: OutlineInputBorder(),
                                     isDense: true,
+                                    border: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: row.ingredienteId != null && _ingredientesConErrorCantidad.contains(row.ingredienteId)
+                                            ? Colors.red.shade700
+                                            : Theme.of(context).colorScheme.outline,
+                                        width: row.ingredienteId != null && _ingredientesConErrorCantidad.contains(row.ingredienteId) ? 2 : 1,
+                                      ),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: row.ingredienteId != null && _ingredientesConErrorCantidad.contains(row.ingredienteId)
+                                            ? Colors.red.shade700
+                                            : Theme.of(context).colorScheme.outline,
+                                        width: row.ingredienteId != null && _ingredientesConErrorCantidad.contains(row.ingredienteId) ? 2 : 1,
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: row.ingredienteId != null && _ingredientesConErrorCantidad.contains(row.ingredienteId)
+                                            ? Colors.red.shade700
+                                            : Theme.of(context).colorScheme.primary,
+                                        width: 2,
+                                      ),
+                                    ),
                                   ),
                                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                   onChanged: (s) => setState(() => row.cantidadText = s),

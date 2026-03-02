@@ -268,6 +268,43 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
     });
   }
 
+  Future<void> _editarFechaPrevista(ListaCompraCabecera lista) async {
+    DateTime initialDate = DateTime.now();
+    if (lista.fechaPrevista != null && lista.fechaPrevista!.isNotEmpty) {
+      final d = DateTime.tryParse(lista.fechaPrevista!);
+      if (d != null) initialDate = d;
+    }
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      final fechaStr = '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+      await context.read<ShoppingService>().updateLista(lista.id, fechaPrevista: fechaStr);
+      if (!mounted) return;
+      _refresh();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Fecha prevista actualizada a ${_formatearFechaString(fechaStr)}.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().replaceFirst('Exception: ', '')),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   bool _listaTieneCompletados(ListaCompraCabecera lista) {
     return lista.items.any((i) =>
         (i.estado == 'completado' || i.completado == true) &&
@@ -642,28 +679,43 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
                           ),
                       ],
                     ),
-                    // Segunda línea: fecha pegada al nombre, alineada a la izquierda
-                    if (lista.fechaPrevista != null) ...[
-                      const SizedBox(height: 4),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.calendar_today,
-                            size: 14,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Fecha prevista: ${_formatearFechaString(lista.fechaPrevista!)}',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+                    // Segunda línea: fecha prevista (editable si no readOnly)
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: widget.readOnly
+                          ? null
+                          : () => _editarFechaPrevista(lista),
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.calendar_today,
+                              size: 14,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Fecha prevista: ${lista.fechaPrevista != null && lista.fechaPrevista!.isNotEmpty ? _formatearFechaString(lista.fechaPrevista!) : 'Sin fecha'}',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (!widget.readOnly) ...[
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.edit_outlined,
+                                size: 12,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
-                    ],
+                    ),
                     if (!widget.readOnly) ...[
                       const SizedBox(height: 4),
                       TabBar(

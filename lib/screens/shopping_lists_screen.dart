@@ -195,7 +195,7 @@ class _ShoppingListsScreenState extends State<ShoppingListsScreen>
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Añade productos desde el Embudo de compra o crea listas en la web.',
+                      'Añade productos desde Ingredientes a productos o crea listas en la web.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),

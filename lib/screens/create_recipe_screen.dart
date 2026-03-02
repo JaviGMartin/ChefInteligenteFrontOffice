@@ -8,6 +8,14 @@ import '../widgets/ingrediente_selector.dart';
 import '../widgets/main_layout.dart';
 import '../widgets/proponer_ingrediente_dialog.dart';
 
+/// Indica uso de un ingrediente en una elaboración/paso (para mensajes de validación).
+class _UsoEnPaso {
+  const _UsoEnPaso({required this.elabTitulo, required this.pasoNum, required this.cantidad});
+  final String elabTitulo;
+  final int pasoNum;
+  final double cantidad;
+}
+
 /// Una fila del formulario: ingrediente + cantidad + unidad.
 class _IngredienteRow {
   int? ingredienteId;
@@ -113,6 +121,10 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
   List<_IngredienteRow> _rows = [_IngredienteRow()];
   final List<_BloqueElaboracion> _bloquesElaboracion = [];
   bool _saving = false;
+  /// Mensaje de validación de cantidades (si no cuadran). Null si todo ok.
+  String? _cantidadErrorMensaje;
+  /// IngredienteIds con cantidad en pasos distinta al total en receta (para marcar en rojo).
+  Set<int> _ingredientesConErrorCantidad = {};
 
   /// Todas las elaboraciones de todos los bloques (para validación y payload).
   Iterable<_ElaboracionForm> get _todasElaboraciones =>
@@ -218,22 +230,61 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
     return null;
   }
 
-  /// Valida que la suma por ingrediente en pasos no supere la cantidad en receta.
-  String? _validarCantidadesIngredientes() {
+  /// Devuelve dónde se usa cada ingrediente: ingredienteId -> [(elabTítulo, pasoNúmero, cantidad), ...].
+  Map<int, List<_UsoEnPaso>> _usoEnPasosPorIngrediente() {
+    final mapa = <int, List<_UsoEnPaso>>{};
+    for (final bloque in _bloquesElaboracion) {
+      for (final elab in bloque.elaboraciones) {
+        final titulo = elab.tituloController.text.trim();
+        final elabTitulo = titulo.isEmpty ? 'Sin título' : titulo;
+        for (var pIdx = 0; pIdx < elab.pasos.length; pIdx++) {
+          final paso = elab.pasos[pIdx];
+          for (final pi in paso.ingredientes) {
+            mapa.putIfAbsent(pi.ingredienteId, () => []).add(_UsoEnPaso(
+              elabTitulo: elabTitulo,
+              pasoNum: pIdx + 1,
+              cantidad: pi.cantidad,
+            ));
+          }
+        }
+      }
+    }
+    return mapa;
+  }
+
+  static String _fmtCantidad(double c) =>
+      c == c.truncateToDouble() ? c.toInt().toString() : c.toString();
+
+  /// Valida que la suma por ingrediente en pasos cuadre con el total en receta.
+  /// Devuelve (mensaje detallado con elaboraciones/pasos, set de ingredienteIds en error).
+  (String?, Set<int>) _validarCantidadesIngredientes() {
     final usada = _cantidadUsadaPorIngrediente();
+    final usoEnPasos = _usoEnPasosPorIngrediente();
     final recipeIngredientes = _rows
         .where((r) => r.ingredienteId != null && r.cantidad > 0)
         .toList();
+    final idsConError = <int>{};
+    final lineas = <String>[];
     for (final r in recipeIngredientes) {
       final total = r.cantidad;
       final usadaIng = usada[r.ingredienteId!] ?? 0;
+      if (usadaIng == total) continue;
+      final nombre = _ingredientes.where((i) => i.id == r.ingredienteId).map((i) => i.nombre).firstOrNull ?? '—';
+      idsConError.add(r.ingredienteId!);
+      final usos = usoEnPasos[r.ingredienteId!] ?? [];
+      final detalle = usos
+          .map((u) => 'Elaboración «${u.elabTitulo}» - Paso ${u.pasoNum}: ${_fmtCantidad(u.cantidad)}')
+          .join('; ');
       if (usadaIng > total) {
-        final listN = _ingredientes.where((i) => i.id == r.ingredienteId).map((i) => i.nombre).toList();
-        final nombre = listN.isEmpty ? '—' : listN.first;
-        return '«$nombre»: se usan $usadaIng pero la receta tiene $total';
+        lineas.add(
+            '«$nombre»: total en receta ${_fmtCantidad(total)}, en pasos ${_fmtCantidad(usadaIng)}. Se usa en: $detalle.');
+      } else {
+        lineas.add(
+            '«$nombre»: total en receta ${_fmtCantidad(total)}, en pasos ${_fmtCantidad(usadaIng)}. Se usa en: $detalle.');
       }
     }
-    return null;
+    if (lineas.isEmpty) return (null, {});
+    return (lineas.join(' '), idsConError);
   }
 
   List<Map<String, dynamic>> _buildElaboracionesPayload() {
@@ -306,13 +357,25 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
       return;
     }
 
-    final errIng = _validarCantidadesIngredientes();
+    final (errIng, idsError) = _validarCantidadesIngredientes();
     if (errIng != null) {
+      setState(() {
+        _cantidadErrorMensaje = errIng;
+        _ingredientesConErrorCantidad = idsError;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ingredientes en elaboraciones: $errIng'), backgroundColor: Colors.red.shade700),
+        SnackBar(
+          content: Text('Cantidades que no cuadran: $errIng'),
+          backgroundColor: Colors.red.shade700,
+          duration: const Duration(seconds: 6),
+        ),
       );
       return;
     }
+    setState(() {
+      _cantidadErrorMensaje = null;
+      _ingredientesConErrorCantidad = {};
+    });
 
     final tiempo = int.tryParse(_tiempoController.text.trim());
     final porciones = int.tryParse(_porcionesController.text.trim());
@@ -367,6 +430,12 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
           'Elaboraciones (opcional)',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.bold,
+              ),
+        ),
+        Text(
+          'Un grupo de elaboraciones paralelas son varias que se hacen a la vez (ej. masa y relleno).',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
         ),
         const SizedBox(height: 8),
@@ -563,7 +632,7 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
             const SizedBox(width: 8),
             TextButton.icon(
               icon: const Icon(Icons.groups),
-              label: const Text('Añadir grupo paralelo'),
+              label: const Text('Añadir Grupo Elaboraciones Paralelas'),
               onPressed: () => setState(() {
                 _bloquesElaboracion.add(_BloqueElaboracion([_ElaboracionForm(), _ElaboracionForm()]));
               }),
@@ -628,11 +697,39 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
                 SizedBox(
                   width: 60,
                   child: TextFormField(
-                    key: ValueKey('cant-$idx-${pi.ingredienteId}-${pi.cantidad}'),
+                    key: ValueKey('cant-${identityHashCode(paso)}-$idx-${pi.ingredienteId}'),
                     initialValue: pi.cantidad.toString(),
-                    decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: _ingredientesConErrorCantidad.contains(pi.ingredienteId)
+                              ? Colors.red.shade700
+                              : Theme.of(context).colorScheme.outline,
+                          width: _ingredientesConErrorCantidad.contains(pi.ingredienteId) ? 2 : 1,
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: _ingredientesConErrorCantidad.contains(pi.ingredienteId)
+                              ? Colors.red.shade700
+                              : Theme.of(context).colorScheme.outline,
+                          width: _ingredientesConErrorCantidad.contains(pi.ingredienteId) ? 2 : 1,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: _ingredientesConErrorCantidad.contains(pi.ingredienteId)
+                              ? Colors.red.shade700
+                              : Theme.of(context).colorScheme.primary,
+                          width: 2,
+                        ),
+                      ),
+                    ),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    onChanged: (s) => setState(() => pi.cantidad = double.tryParse(s.replaceAll(',', '.')) ?? pi.cantidad),
+                    onChanged: (s) {
+                      pi.cantidad = double.tryParse(s.replaceAll(',', '.')) ?? pi.cantidad;
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -896,10 +993,33 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
                                 width: 80,
                                 child: TextFormField(
                                   initialValue: row.cantidadText,
-                                  decoration: const InputDecoration(
+                                  decoration: InputDecoration(
                                     labelText: 'Cant.',
-                                    border: OutlineInputBorder(),
                                     isDense: true,
+                                    border: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: row.ingredienteId != null && _ingredientesConErrorCantidad.contains(row.ingredienteId)
+                                            ? Colors.red.shade700
+                                            : Theme.of(context).colorScheme.outline,
+                                        width: row.ingredienteId != null && _ingredientesConErrorCantidad.contains(row.ingredienteId) ? 2 : 1,
+                                      ),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: row.ingredienteId != null && _ingredientesConErrorCantidad.contains(row.ingredienteId)
+                                            ? Colors.red.shade700
+                                            : Theme.of(context).colorScheme.outline,
+                                        width: row.ingredienteId != null && _ingredientesConErrorCantidad.contains(row.ingredienteId) ? 2 : 1,
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: row.ingredienteId != null && _ingredientesConErrorCantidad.contains(row.ingredienteId)
+                                            ? Colors.red.shade700
+                                            : Theme.of(context).colorScheme.primary,
+                                        width: 2,
+                                      ),
+                                    ),
                                   ),
                                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                   onChanged: (s) => setState(() => row.cantidadText = s),

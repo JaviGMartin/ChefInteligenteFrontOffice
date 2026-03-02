@@ -70,3 +70,18 @@ class ElaboracionForm {
     }
   }
 }
+
+/// Bloque que agrupa una o más elaboraciones (varias = elaboraciones en paralelo).
+class BloqueElaboracion {
+  final List<ElaboracionForm> elaboraciones = [];
+
+  BloqueElaboracion([List<ElaboracionForm>? elaboracionesIniciales]) {
+    if (elaboracionesIniciales != null) elaboraciones.addAll(elaboracionesIniciales);
+  }
+
+  void dispose() {
+    for (final e in elaboraciones) {
+      e.dispose();
+    }
+  }
+}

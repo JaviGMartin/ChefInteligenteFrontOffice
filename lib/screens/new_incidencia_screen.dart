@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../models/recipe.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_drawer.dart';
 import '../services/incidencia_service.dart';
+import '../services/recipe_service.dart';
 
 /// Formulario para enviar una incidencia (problema) o propuesta (mejora).
 class NewIncidenciaScreen extends StatefulWidget {
@@ -19,8 +21,33 @@ class _NewIncidenciaScreenState extends State<NewIncidenciaScreen> {
   final _cuerpoController = TextEditingController();
 
   String _tipo = 'incidencia';
-  String? _contexto;
+  String _contexto = 'general';
+  int? _recetaId;
+  int? _ingredienteId;
   bool _sending = false;
+  List<Recipe> _recetas = [];
+  List<Ingredient> _ingredientes = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecetas();
+    _loadIngredientes();
+  }
+
+  Future<void> _loadRecetas() async {
+    try {
+      final list = await RecipeService().fetchRecipes();
+      if (mounted) setState(() => _recetas = list);
+    } catch (_) {}
+  }
+
+  Future<void> _loadIngredientes() async {
+    try {
+      final list = await RecipeService().fetchIngredientes();
+      if (mounted) setState(() => _ingredientes = list);
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
@@ -37,6 +64,8 @@ class _NewIncidenciaScreenState extends State<NewIncidenciaScreen> {
       await IncidenciaService().crearIncidencia(
         tipo: _tipo,
         contexto: _contexto,
+        recetaId: _contexto == 'receta' ? _recetaId : null,
+        ingredienteId: _contexto == 'ingrediente' ? _ingredienteId : null,
         asunto: _asuntoController.text.trim(),
         cuerpo: _cuerpoController.text.trim(),
       );
@@ -73,14 +102,19 @@ class _NewIncidenciaScreenState extends State<NewIncidenciaScreen> {
         foregroundColor: AppColors.brandWhite,
       ),
       drawer: const AppDrawer(),
-      body: StainlessBackground(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return StainlessBackground(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                 Text(
                   '¿Qué deseas enviar?',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -110,17 +144,59 @@ class _NewIncidenciaScreenState extends State<NewIncidenciaScreen> {
                 DropdownButtonFormField<String>(
                   value: _contexto,
                   decoration: const InputDecoration(
-                    labelText: 'Contexto (opcional)',
+                    labelText: 'Contexto',
                     border: OutlineInputBorder(),
                   ),
                   items: const [
-                    DropdownMenuItem(value: null, child: Text('General')),
                     DropdownMenuItem(value: 'general', child: Text('General')),
                     DropdownMenuItem(value: 'receta', child: Text('Receta')),
                     DropdownMenuItem(value: 'ingrediente', child: Text('Ingrediente')),
                   ],
-                  onChanged: (v) => setState(() => _contexto = v),
+                  onChanged: (v) => setState(() {
+                    _contexto = v ?? 'general';
+                    if (_contexto != 'receta') _recetaId = null;
+                    if (_contexto != 'ingrediente') _ingredienteId = null;
+                  }),
                 ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Si es sobre una receta o ingrediente concreto, selecciona Receta o Ingrediente para vincularlo.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ),
+                if (_contexto == 'receta') ...[
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    value: _recetaId,
+                    decoration: const InputDecoration(
+                      labelText: 'Receta relacionada (opcional)',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('— Ninguna —')),
+                      ..._recetas.map((r) => DropdownMenuItem(value: r.id, child: Text(r.titulo))),
+                    ],
+                    onChanged: (v) => setState(() => _recetaId = v),
+                  ),
+                ],
+                if (_contexto == 'ingrediente') ...[
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    value: _ingredienteId,
+                    decoration: const InputDecoration(
+                      labelText: 'Ingrediente relacionado (opcional)',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('— Ninguno —')),
+                      ..._ingredientes.map((i) => DropdownMenuItem(value: i.id, child: Text(i.nombre))),
+                    ],
+                    onChanged: (v) => setState(() => _ingredienteId = v),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _asuntoController,
@@ -169,10 +245,13 @@ class _NewIncidenciaScreenState extends State<NewIncidenciaScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                 ),
-              ],
+                    ],
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }

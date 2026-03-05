@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../services/hogar_service.dart';
 import '../widgets/app_drawer.dart';
-import 'recipe_list_screen.dart';
+import 'home_screen.dart';
 
 class HomeSetupScreen extends StatefulWidget {
   const HomeSetupScreen({super.key});
@@ -58,7 +58,7 @@ class _HomeSetupScreenState extends State<HomeSetupScreen> {
         return;
       }
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const RecipeListScreen()),
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
     } catch (error) {
       if (!mounted) {

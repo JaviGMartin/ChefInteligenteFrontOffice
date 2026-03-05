@@ -1,7 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
 
-import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, debugPrint;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -81,12 +82,36 @@ class RecipeService {
       return [];
     }
     final uri = Uri.parse('$baseUrl/recipes/planificador');
-    final response = await http.get(uri, headers: _headers(token: token));
+    final response = await http.get(uri, headers: _headers(token: token)).timeout(
+      const Duration(seconds: 60),
+      onTimeout: () => throw TimeoutException('El servidor no respondió. Comprueba que el backend esté en marcha.'),
+    );
 
     if (response.statusCode != 200) {
       throw Exception('Error al cargar el planificador: ${response.statusCode}');
     }
 
+    final payload = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = payload['data'];
+    if (data is! List) {
+      return [];
+    }
+    return data
+        .map((item) => Recipe.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Recetas del dietista asignado (solo usuarios Gold). Pueden estar en borrador; el usuario no las edita pero sí puede añadirlas al planificador.
+  Future<List<Recipe>> fetchRecetasNutricionista() async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      return [];
+    }
+    final uri = Uri.parse('$baseUrl/recipes/nutricionista');
+    final response = await http.get(uri, headers: _headers(token: token));
+    if (response.statusCode != 200) {
+      return [];
+    }
     final payload = jsonDecode(response.body) as Map<String, dynamic>;
     final data = payload['data'];
     if (data is! List) {
@@ -316,8 +341,6 @@ class RecipeService {
       body['elaboraciones'] = elaboraciones;
     }
     final bodyJson = jsonEncode(body);
-    debugPrint('[RecipeService.updateRecipe] PUT $uri');
-    debugPrint('[RecipeService.updateRecipe] body: $bodyJson');
     final response = await http.put(
       uri,
       headers: _headers(token: token)..['Content-Type'] = 'application/json',

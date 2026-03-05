@@ -14,6 +14,8 @@ class PendienteCompra {
   final UnidadMedidaRef? unidadMedida;
   final int? productoId;
   final ProductoRef? producto;
+  /// Sugerencia de producto por preferencia aprendida (backend). Null si no hay preferencia.
+  final ProductoRef? productoSugerido;
   final int? listaDestinoId;
   final ListaDestinoRef? listaDestino;
 
@@ -32,6 +34,7 @@ class PendienteCompra {
     this.unidadMedida,
     this.productoId,
     this.producto,
+    this.productoSugerido,
     this.listaDestinoId,
     this.listaDestino,
   });
@@ -57,6 +60,9 @@ class PendienteCompra {
       productoId: _toIntNullable(json['producto_id']),
       producto: json['producto'] is Map<String, dynamic>
           ? ProductoRef.fromJson(json['producto'] as Map<String, dynamic>)
+          : null,
+      productoSugerido: json['producto_sugerido'] is Map<String, dynamic>
+          ? ProductoRef.fromJson(json['producto_sugerido'] as Map<String, dynamic>)
           : null,
       listaDestinoId: _toIntNullable(json['lista_destino_id']),
       listaDestino: json['lista_destino'] is Map<String, dynamic>

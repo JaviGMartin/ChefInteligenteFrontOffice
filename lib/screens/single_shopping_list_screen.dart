@@ -57,7 +57,7 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
     try {
       final item = await shopping.buscarItemPorEan(listaId, normalized);
       if (!mounted) return;
-      final nombre = item.producto?.nombre ?? 'este producto';
+      final nombre = item.displayNombre;
       final esPendiente = item.estado == 'pendiente';
 
       if (esPendiente) {
@@ -251,14 +251,7 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
 
   Future<ListaCompraCabecera> _cargarLista() async {
     final svc = context.read<ShoppingService>();
-    final listas = widget.readOnly
-        ? await svc.getListas(archivada: true)
-        : await svc.getListas(archivada: false, pendienteProcesar: widget.pendienteDeProcesar);
-    final lista = listas.firstWhere(
-      (l) => l.id == widget.listaId,
-      orElse: () => throw Exception('Lista no encontrada'),
-    );
-    return lista;
+    return svc.getLista(widget.listaId);
   }
 
   void _refresh() {
@@ -329,30 +322,201 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
     if (_busqueda.trim().isEmpty) return items;
     final q = _busqueda.trim().toLowerCase();
     return items.where((i) {
-      final nombre = (i.producto?.nombre ?? '').toLowerCase();
+      final nombre = (i.producto?.nombre ?? i.ingrediente?.nombre ?? '').toLowerCase();
       final marca = (i.producto?.marca ?? '').toLowerCase();
       return nombre.contains(q) || marca.contains(q);
     }).toList();
   }
 
-  /// Abre un modal para editar la cantidad del ítem (y opcionalmente unidad). Solo para ítems pendientes.
+  /// Abre un modal para editar cantidad y unidad del ítem (p. ej. "3 manzanas" → "10", o "200 g" → "1 kg").
+  /// Solo para ítems pendientes. La cantidad/unidad que pongas es la que vas a comprar.
   Future<void> _showEditarCantidad(BuildContext context, ListaCompraItem item) async {
-    final result = await showDialog<double?>(
+    final shopping = context.read<ShoppingService>();
+    final result = await showDialog<(double, int?)?>(
       context: context,
-      builder: (ctx) => _EditarCantidadDialog(item: item),
+      builder: (ctx) => _EditarCantidadDialog(
+        item: item,
+        unidadesFuture: shopping.getUnidadesMedida(ingredienteId: item.ingredienteId),
+      ),
     );
     if (result == null || !mounted) return;
-    final shopping = context.read<ShoppingService>();
+    final (cantidad, unidadMedidaId) = result;
     try {
-      await shopping.updateListItem(item.id, cantidad: result);
+      await shopping.updateListItem(
+        item.id,
+        cantidad: cantidad,
+        unidadMedidaId: unidadMedidaId,
+      );
       if (!mounted) return;
       _refresh();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Cantidad actualizada.'),
+          content: Text('Cantidad y unidad actualizadas.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  /// Asigna o sustituye el producto de un ítem (lista de productos para ese ingrediente).
+  /// Si la lista tiene proveedor (ej. Mercadona), solo se muestran productos de ese proveedor.
+  Future<void> _elegirProductoParaItem(
+    BuildContext context,
+    ListaCompraItem item,
+    ListaCompraCabecera lista,
+  ) async {
+    if (item.ingredienteId == null) return;
+    final shopping = context.read<ShoppingService>();
+    List<ProductoSimple> productos;
+    try {
+      productos = await shopping.getProductosPorIngrediente(
+        item.ingredienteId!,
+        proveedorId: lista.proveedorId,
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    if (!context.mounted) return;
+    if (productos.isEmpty) {
+      final quiereAnadir = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('No hay productos para este ingrediente'),
+          content: Text(
+            'No hay productos para "${item.ingrediente?.nombre ?? 'este ingrediente'}" en el catálogo. '
+            '¿Quieres añadirlo? Podrás indicar el nombre y el código de barras del producto que tienes en la mano.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('No'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Sí, añadir'),
+            ),
+          ],
+        ),
+      );
+      if (quiereAnadir != true || !mounted) return;
+      await _mostrarFormularioProponerProducto(context, item, lista);
+      return;
+    }
+    final esSustitucion = item.productoId != null;
+    final tituloDialogo = esSustitucion
+        ? 'Sustituir producto (${item.ingrediente?.nombre ?? 'este ingrediente'})'
+        : 'Elegir producto para ${item.ingrediente?.nombre ?? 'este ingrediente'}';
+    final selectedId = await showModalBottomSheet<int>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                tituloDialogo,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: productos.length,
+                itemBuilder: (_, i) {
+                  final p = productos[i];
+                  return ListTile(
+                    title: Text(p.displayNombre),
+                    onTap: () => Navigator.of(ctx).pop(p.id),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selectedId == null || !mounted) return;
+    try {
+      await shopping.updateListItem(item.id, productoId: selectedId);
+      if (!mounted) return;
+      _refresh();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            esSustitucion ? 'Producto sustituido.' : 'Producto asignado. Puedes cambiarlo con "Sustituir producto".',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on ProductoOtroSupermercadoException catch (e) {
+      if (!mounted) return;
+      final anadir = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Producto de otro supermercado'),
+          content: Text(
+            'Este producto es de ${e.proveedorNombre}. '
+            'No se puede añadir a la lista de ${lista.titulo}. '
+            '¿Quieres añadirlo a la lista de ${e.proveedorNombre}? El ítem se quitará de esta lista.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('No'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text('Sí, añadir a lista de ${e.proveedorNombre}'),
+            ),
+          ],
+        ),
+      );
+      if (anadir != true || !mounted) return;
+      try {
+        final listaOtro = await shopping.getOrCreateListaForProveedor(e.proveedorId);
+        await shopping.addItemToLista(
+          listaOtro.id,
+          selectedId,
+          item.cantidad > 0 ? item.cantidad : (item.cantidadCompra > 0 ? item.cantidadCompra : 1),
+          unidadMedidaId: item.unidadMedidaId,
+        );
+        await shopping.deleteListItem(item.id);
+        if (!mounted) return;
+        _refresh();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Añadido a la lista de ${e.proveedorNombre}. El ítem se ha quitado de esta lista.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } catch (e2) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e2.toString().replaceFirst('Exception: ', '')),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -432,8 +596,8 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
       builder: (ctx) => AlertDialog(
         title: const Text('Finalizar compra'),
         content: const Text(
-          '¿Ya pasaste por caja? La lista pasará a "Pendientes de procesar". '
-          'Cuando llegues a casa podrás indicar caducidad y ubicación desde esa sección.',
+          '¿Ya pasaste por caja? La lista seguirá en Activas pero pasará a estar pendiente de procesar. '
+          'En casa ábrela desde Compra → Activas, pulsa «Procesar» e indica para cada producto la cantidad comprada, el contenedor donde guardarlo y, si quieres, la fecha de caducidad.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
@@ -447,7 +611,7 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Lista pasada a Pendientes de procesar. Procesa cuando llegues a casa.'),
+            content: Text('La lista sigue en Activas. Ábrela y pulsa «Procesar» cuando llegues a casa.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -827,14 +991,25 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
 
                             final subtitulo = [
                               item.cantidadYEmpaquetado,
-                              if ((item.producto?.marca ?? '').isNotEmpty)
+                              if (item.producto != null && (item.producto!.marca ?? '').isNotEmpty)
                                 item.producto!.marca!,
-                            ].join(' · ');
+                              if (item.productoId == null &&
+                                  item.ingrediente != null &&
+                                  (item.producto == null || item.producto!.id != 0))
+                                'Sin producto asignado',
+                            ].where((e) => e.isNotEmpty).join(' · ');
 
                             final canEditarCantidad = isPendientes &&
                                 !noDisponible &&
                                 !procesado &&
                                 !widget.readOnly;
+                            final puedeElegirProducto = canEditarCantidad &&
+                                item.productoId == null &&
+                                item.ingredienteId != null;
+                            final puedeSustituirProducto = canEditarCantidad &&
+                                item.productoId != null &&
+                                item.ingredienteId != null;
+                            final sinProductoAsignado = item.productoId == null && item.ingredienteId != null;
                             return ListTile(
                               dense: true,
                               visualDensity: VisualDensity.compact,
@@ -842,7 +1017,7 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
                               leading: Checkbox(
                                 value: completado || procesado,
                                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                onChanged: (procesado || noDisponible || widget.readOnly)
+                                onChanged: (procesado || noDisponible || widget.readOnly || sinProductoAsignado)
                                     ? null
                                     : (val) async {
                                         try {
@@ -869,7 +1044,7 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
                                     ? () => _showEditarCantidad(context, item)
                                     : null,
                                 child: Text(
-                                  item.producto?.nombre ?? 'Producto desconocido',
+                                  item.displayNombre,
                                   style: procesado || completado
                                       ? const TextStyle(
                                           decoration: TextDecoration.lineThrough,
@@ -893,18 +1068,41 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Chip(
-                                    label: Text(
-                                      estadoLabel,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: estadoColor,
+                                  if (puedeElegirProducto)
+                                    TextButton(
+                                      onPressed: () => _elegirProductoParaItem(context, item, lista),
+                                      child: Text(
+                                        'Elegir producto',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Theme.of(context).colorScheme.primary,
+                                        ),
                                       ),
                                     ),
-                                    backgroundColor: estadoColor.withOpacity(0.2),
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
-                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  ),
+                                  if (puedeSustituirProducto)
+                                    TextButton(
+                                      onPressed: () => _elegirProductoParaItem(context, item, lista),
+                                      child: Text(
+                                        'Sustituir producto',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Theme.of(context).colorScheme.primary,
+                                        ),
+                                      ),
+                                    ),
+                                  if (widget.readOnly)
+                                    Chip(
+                                      label: Text(
+                                        estadoLabel,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: estadoColor,
+                                        ),
+                                      ),
+                                      backgroundColor: estadoColor.withOpacity(0.2),
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
                                   if (!procesado && !widget.readOnly)
                                     (isDescartados && noDisponible) || (isProcesados && completado)
                                         ? IconButton(
@@ -977,7 +1175,7 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
                                           builder: (ctx) => AlertDialog(
                                             title: const Text('Eliminar de la lista'),
                                             content: Text(
-                                              '¿Quitar "${item.producto?.nombre ?? 'este ítem'}" de la lista?',
+                                              '¿Quitar "${item.displayNombre}" de la lista?',
                                             ),
                                             actions: [
                                               TextButton(
@@ -1080,11 +1278,279 @@ class _SingleShoppingListScreenState extends State<SingleShoppingListScreen> wit
     return listContent;
   }
 
+  /// Muestra el formulario para proponer un producto (nombre, EAN, opcionales) cuando no hay productos para el ingrediente.
+  Future<void> _mostrarFormularioProponerProducto(
+    BuildContext context,
+    ListaCompraItem item,
+    ListaCompraCabecera lista,
+  ) async {
+    final shopping = context.read<ShoppingService>();
+    List<ProveedorItem>? proveedores;
+    List<UnidadMedidaCompleta>? unidades;
+    try {
+      final results = await Future.wait([
+        shopping.getProveedores(),
+        shopping.getUnidadesMedida(ingredienteId: item.ingredienteId),
+      ]);
+      proveedores = results[0] as List<ProveedorItem>;
+      unidades = results[1] as List<UnidadMedidaCompleta>;
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error al cargar datos.'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    if (!context.mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => _FormularioProponerProducto(
+        item: item,
+        lista: lista,
+        shopping: shopping,
+        proveedores: proveedores!,
+        unidades: unidades!,
+        onSuccess: () {
+          _refresh();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Producto propuesto añadido. Será validado por el equipo.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   /// Formatea una fecha en formato ISO (YYYY-MM-DD) a DD/MM/YYYY.
   String _formatearFechaString(String fechaIso) {
     final d = DateTime.tryParse(fechaIso);
     if (d == null) return fechaIso;
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+}
+
+/// Formulario para proponer un producto cuando no hay en el catálogo (nombre, EAN, opcionales).
+class _FormularioProponerProducto extends StatefulWidget {
+  const _FormularioProponerProducto({
+    required this.item,
+    required this.lista,
+    required this.shopping,
+    required this.proveedores,
+    required this.unidades,
+    required this.onSuccess,
+  });
+
+  final ListaCompraItem item;
+  final ListaCompraCabecera lista;
+  final ShoppingService shopping;
+  final List<ProveedorItem> proveedores;
+  final List<UnidadMedidaCompleta> unidades;
+  final VoidCallback onSuccess;
+
+  @override
+  State<_FormularioProponerProducto> createState() => _FormularioProponerProductoState();
+}
+
+class _FormularioProponerProductoState extends State<_FormularioProponerProducto> {
+  final _formKey = GlobalKey<FormState>();
+  final _nombreController = TextEditingController();
+  final _eanController = TextEditingController();
+  final _cantidadController = TextEditingController();
+  final _precioController = TextEditingController();
+  final _formatoController = TextEditingController();
+  int? _proveedorId;
+  int? _unidadMedidaId;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _proveedorId = widget.lista.proveedorId;
+    if (_proveedorId == null && widget.proveedores.isNotEmpty) {
+      _proveedorId = widget.proveedores.first.id;
+    }
+  }
+
+  @override
+  void dispose() {
+    _nombreController.dispose();
+    _eanController.dispose();
+    _cantidadController.dispose();
+    _precioController.dispose();
+    _formatoController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _enviar() async {
+    if (!_formKey.currentState!.validate() || _sending) return;
+    final nombre = _nombreController.text.trim();
+    final ean = _eanController.text.trim().replaceAll(RegExp(r'\s+'), '');
+    if (nombre.isEmpty || ean.isEmpty) return;
+    setState(() => _sending = true);
+    try {
+      await widget.shopping.proponerProducto(
+        widget.item.id,
+        nombre: nombre,
+        ean: ean,
+        proveedorId: _proveedorId,
+        cantidadUnidad: double.tryParse(_cantidadController.text.trim().replaceAll(',', '.')),
+        unidadMedidaId: _unidadMedidaId,
+        precio: double.tryParse(_precioController.text.trim().replaceAll(',', '.')),
+        formatoProveedor: _formatoController.text.trim().isEmpty ? null : _formatoController.text.trim(),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      widget.onSuccess();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+        left: 16,
+        right: 16,
+        top: 16,
+      ),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Añadir producto para ${widget.item.ingrediente?.nombre ?? 'este ingrediente'}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _nombreController,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre del producto',
+                  hintText: 'Ej. Aceite de girasol 1L',
+                  border: OutlineInputBorder(),
+                ),
+                textCapitalization: TextCapitalization.words,
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _eanController,
+                      decoration: const InputDecoration(
+                        labelText: 'Código de barras (EAN)',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.number,
+                      validator: (v) => (v == null || v.trim().replaceAll(RegExp(r'\s+'), '').isEmpty) ? 'Obligatorio' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filled(
+                    tooltip: 'Escanear',
+                    onPressed: () async {
+                      final ean = await Navigator.of(context).push<String>(
+                        MaterialPageRoute<String>(builder: (_) => const BarcodeScannerScreen()),
+                      );
+                      if (ean != null && ean.trim().isNotEmpty && mounted) {
+                        _eanController.text = ean;
+                      }
+                    },
+                    icon: const Icon(Icons.qr_code_scanner),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (widget.proveedores.isNotEmpty) ...[
+                DropdownButtonFormField<int>(
+                  value: _proveedorId,
+                  decoration: const InputDecoration(
+                    labelText: 'Supermercado',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: widget.proveedores
+                      .map((p) => DropdownMenuItem<int>(value: p.id, child: Text(p.nombre)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _proveedorId = v),
+                ),
+                const SizedBox(height: 12),
+              ],
+              TextFormField(
+                controller: _cantidadController,
+                decoration: const InputDecoration(
+                  labelText: 'Cantidad (opcional)',
+                  hintText: 'Ej. 1',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+              if (widget.unidades.isNotEmpty) ...[
+                DropdownButtonFormField<int?>(
+                  value: _unidadMedidaId,
+                  decoration: const InputDecoration(
+                    labelText: 'Unidad de medida (opcional)',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<int?>(value: null, child: Text('—')),
+                    ...widget.unidades
+                        .map((u) => DropdownMenuItem<int?>(value: u.id, child: Text('${u.nombre} (${u.abreviatura ?? u.nombre})'))),
+                  ],
+                  onChanged: (v) => setState(() => _unidadMedidaId = v),
+                ),
+                const SizedBox(height: 12),
+              ],
+              TextFormField(
+                controller: _precioController,
+                decoration: const InputDecoration(
+                  labelText: 'Precio (opcional)',
+                  hintText: 'Ej. 2.99',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _formatoController,
+                decoration: const InputDecoration(
+                  labelText: 'Formato (opcional)',
+                  hintText: 'Ej. brik, pack',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: _sending ? null : _enviar,
+                child: Text(_sending ? 'Enviando…' : 'Añadir producto propuesto'),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1141,11 +1607,15 @@ class _AnadirCantidadDialogState extends State<_AnadirCantidadDialog> {
   }
 }
 
-/// Diálogo para editar la cantidad de un ítem de la lista.
+/// Diálogo para editar cantidad y unidad de un ítem (lo que vas a comprar: p. ej. 10 manzanas o 1 kg de azúcar).
 class _EditarCantidadDialog extends StatefulWidget {
-  const _EditarCantidadDialog({required this.item});
+  const _EditarCantidadDialog({
+    required this.item,
+    required this.unidadesFuture,
+  });
 
   final ListaCompraItem item;
+  final Future<List<UnidadMedidaCompleta>> unidadesFuture;
 
   @override
   State<_EditarCantidadDialog> createState() => _EditarCantidadDialogState();
@@ -1153,6 +1623,7 @@ class _EditarCantidadDialog extends StatefulWidget {
 
 class _EditarCantidadDialogState extends State<_EditarCantidadDialog> {
   late final TextEditingController _controller;
+  int? _unidadMedidaId;
 
   @override
   void initState() {
@@ -1161,6 +1632,7 @@ class _EditarCantidadDialogState extends State<_EditarCantidadDialog> {
     _controller = TextEditingController(
       text: c == c.roundToDouble() ? c.toInt().toString() : c.toString(),
     );
+    _unidadMedidaId = widget.item.unidadMedidaId;
   }
 
   @override
@@ -1172,17 +1644,77 @@ class _EditarCantidadDialogState extends State<_EditarCantidadDialog> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    final unidadLabel = (item.unidadMedida?.abreviatura ?? item.unidadMedida?.nombre ?? 'ud.').trim();
     return AlertDialog(
-      title: Text(item.producto?.nombre ?? 'Editar cantidad'),
-      content: TextField(
-        controller: _controller,
-        decoration: InputDecoration(
-          labelText: 'Cantidad ($unidadLabel)',
-          border: const OutlineInputBorder(),
-        ),
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        autofocus: true,
+      title: Text(item.displayNombre),
+      content: FutureBuilder<List<UnidadMedidaCompleta>>(
+        future: widget.unidadesFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final unidades = snapshot.data ?? [];
+          final idValido = _unidadMedidaId != null &&
+              unidades.any((u) => u.id == _unidadMedidaId);
+          final valorDropdown = idValido
+              ? _unidadMedidaId!
+              : (unidades.isNotEmpty ? unidades.first.id : null);
+          if (!idValido && unidades.isNotEmpty && _unidadMedidaId != null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _unidadMedidaId = unidades.first.id);
+            });
+          } else if (_unidadMedidaId == null && unidades.isNotEmpty) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _unidadMedidaId == null) {
+                setState(() => _unidadMedidaId = unidades.first.id);
+              }
+            });
+          }
+          return SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Cantidad y unidad que vas a comprar (p. ej. 10 unidades o 1 kg).',
+                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+                const SizedBox(height: 16),
+                if (unidades.isNotEmpty)
+                  DropdownButtonFormField<int>(
+                    value: valorDropdown,
+                    decoration: const InputDecoration(
+                      labelText: 'Unidad de medida',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: unidades
+                        .map((u) => DropdownMenuItem<int>(
+                              value: u.id,
+                              child: Text(
+                                '${u.abreviatura ?? u.nombre}',
+                              ),
+                            ))
+                        .toList(),
+                    onChanged: (v) => setState(() => _unidadMedidaId = v),
+                  ),
+                if (unidades.isNotEmpty) const SizedBox(height: 12),
+                TextField(
+                  controller: _controller,
+                  decoration: InputDecoration(
+                    labelText: 'Cantidad',
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  autofocus: true,
+                ),
+              ],
+            ),
+          );
+        },
       ),
       actions: [
         TextButton(
@@ -1195,7 +1727,7 @@ class _EditarCantidadDialogState extends State<_EditarCantidadDialog> {
               _controller.text.trim().replaceAll(',', '.'),
             );
             if (v != null && v > 0) {
-              Navigator.pop(context, v);
+              Navigator.pop(context, (v, _unidadMedidaId));
             }
           },
           child: const Text('Guardar'),

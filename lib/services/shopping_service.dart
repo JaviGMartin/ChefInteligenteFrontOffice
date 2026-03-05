@@ -8,10 +8,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/lista_compra.dart';
 import '../models/pendiente_compra.dart';
 
+/// Lanzada cuando se intenta asignar un producto de otro supermercado a una lista vinculada a un supermercado distinto.
+class ProductoOtroSupermercadoException implements Exception {
+  ProductoOtroSupermercadoException(this.proveedorId, this.proveedorNombre);
+  final int proveedorId;
+  final String proveedorNombre;
+  @override
+  String toString() => 'Producto de $proveedorNombre (proveedor_id: $proveedorId)';
+}
+
 class ShoppingService {
   static const String _androidEmulatorBaseUrl = 'http://10.0.2.2:8000/api';
   static const String _hostIp = '192.168.1.39';
   static const String _deviceBaseUrl = 'http://$_hostIp:8000/api';
+
+  final Map<String, List<UnidadMedidaCompleta>> _unidadesMedidaCache = {};
+  final Map<String, Future<List<UnidadMedidaCompleta>>> _unidadesMedidaInFlight = {};
 
   String get _baseUrl {
     if (kIsWeb) {
@@ -70,9 +82,12 @@ class ShoppingService {
 
   /// Envía a Ingredientes a productos los ingredientes faltantes de varias recetas (p. ej. del Planner).
   /// [recipeIds] IDs de recetas. [porcionesDeseadas] opcional map recetaId -> porciones.
+  /// [recetaCantidades] opcional map recetaId -> veces (p. ej. repeticiones en la semana); se envía como receta_cantidades.
   Future<BulkEnviarResult> bulkEnviarAPendientes(
     List<int> recipeIds, {
     Map<int, int>? porcionesDeseadas,
+    Map<int, int>? recetaCantidades,
+    bool forzarReenvio = false,
   }) async {
     final token = await _getToken();
     if (token == null || token.isEmpty) {
@@ -84,6 +99,12 @@ class ShoppingService {
     if (porcionesDeseadas != null && porcionesDeseadas.isNotEmpty) {
       body['porciones_deseadas'] = porcionesDeseadas.map((k, v) => MapEntry(k.toString(), v));
     }
+    if (recetaCantidades != null && recetaCantidades.isNotEmpty) {
+      body['receta_cantidades'] = recetaCantidades.map((k, v) => MapEntry(k.toString(), v));
+    }
+    if (forzarReenvio) {
+      body['forzar_reenvio'] = true;
+    }
     final uri = Uri.parse('$_baseUrl/shopping/pendientes/bulk');
     final response = await http.post(
       uri,
@@ -94,10 +115,13 @@ class ShoppingService {
       throw Exception(_extractError(response.body, response.statusCode));
     }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final provSug = decoded['proveedor_sugerido_id'];
     return BulkEnviarResult(
       message: decoded['message'] as String? ?? '',
       ingredientesAnadidos: (decoded['ingredientes_anadidos'] as num?)?.toInt() ?? 0,
       recetasProcesadas: (decoded['recetas_procesadas'] as List<dynamic>?)?.length ?? 0,
+      reenvioDisponible: decoded['reenvio_disponible'] == true,
+      proveedorSugeridoId: provSug is int ? provSug : (provSug is num ? provSug.toInt() : null),
     );
   }
 
@@ -130,6 +154,75 @@ class ShoppingService {
     }
   }
 
+  /// Distribuye varios pendientes a una misma lista en una sola petición (más rápido que N llamadas a distribuirPendiente).
+  Future<int> distribuirPendienteBulk({
+    required int listaDestinoId,
+    required List<int> pendienteIds,
+  }) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    if (pendienteIds.isEmpty) {
+      throw Exception('Indica al menos un pendiente.');
+    }
+    final uri = Uri.parse('$_baseUrl/shopping/pendientes/distribuir-bulk');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'lista_destino_id': listaDestinoId,
+        'pendiente_ids': pendienteIds,
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final distribuidos = decoded['distribuidos'];
+    return distribuidos is int ? distribuidos : pendienteIds.length;
+  }
+
+  /// Distribuye pendientes según preferencia de proveedor.
+  Future<DistribucionPreferenciaResult> distribuirPendientesPorPreferencia({
+    required int preferenciaProveedorId,
+    required List<int> pendienteIds,
+    String? fechaPrevista,
+  }) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    if (pendienteIds.isEmpty) {
+      throw Exception('Indica al menos un pendiente.');
+    }
+    final body = <String, dynamic>{
+      'preferencia_proveedor_id': preferenciaProveedorId,
+      'pendiente_ids': pendienteIds,
+    };
+    if (fechaPrevista != null && fechaPrevista.isNotEmpty) {
+      body['fecha_prevista'] = fechaPrevista;
+    }
+    final uri = Uri.parse('$_baseUrl/shopping/pendientes/distribuir-preferencia');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(token),
+      body: jsonEncode(body),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final listaPrincipalId = decoded['lista_principal_id'];
+    final listasPorProveedor = decoded['listas_por_proveedor'];
+    return DistribucionPreferenciaResult(
+      listaPrincipalId: listaPrincipalId is int ? listaPrincipalId : (listaPrincipalId is num ? listaPrincipalId.toInt() : null),
+      listasPorProveedor: listasPorProveedor is Map<String, dynamic>
+          ? listasPorProveedor.map((k, v) => MapEntry(int.parse(k.toString()), (v as num).toInt()))
+          : const {},
+    );
+  }
+
   /// Listas de compra del hogar activo, con ítems. [archivada] true = solo archivadas, false = solo activas.
   Future<List<ListaCompraCabecera>> getListas({
     bool archivada = false,
@@ -155,6 +248,28 @@ class ShoppingService {
         .whereType<Map<String, dynamic>>()
         .map((e) => ListaCompraCabecera.fromJson(e))
         .toList();
+  }
+
+  /// Obtiene una sola lista de compra por ID (con ítems). Más eficiente que getListas cuando solo se necesita una lista.
+  Future<ListaCompraCabecera> getLista(int id) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    final uri = Uri.parse('$_baseUrl/shopping/listas/$id');
+    final response = await http.get(uri, headers: _authHeaders(token));
+    if (response.statusCode == 404) {
+      throw Exception('Lista no encontrada.');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = decoded['data'] as Map<String, dynamic>?;
+    if (data == null) {
+      throw Exception('Respuesta inválida.');
+    }
+    return ListaCompraCabecera.fromJson(data);
   }
 
   /// Elimina una lista de compra. Solo permitido si está archivada.
@@ -339,19 +454,41 @@ class ShoppingService {
     return ListaCompraCabecera.fromJson(data);
   }
 
-  /// Obtiene una lista de compra existente para el proveedor o la crea si el proveedor
-  /// tiene "crear lista automáticamente" activado (ej. Mercadona). Si el proveedor no
-  /// tiene el flag (ej. Carrefour), el backend responde 422 y no se crea lista.
-  Future<ListaCompraCabecera> getOrCreateListaForProveedor(int proveedorId) async {
+  /// Lista proveedores con crear_lista_automatica para el selector "¿A qué supermercado vas?".
+  Future<List<ProveedorItem>> getProveedores() async {
     final token = await _getToken();
     if (token == null || token.isEmpty) {
       throw Exception('Sesión no iniciada.');
     }
+    final uri = Uri.parse('$_baseUrl/shopping/proveedores');
+    final response = await http.get(uri, headers: _authHeaders(token));
+    if (response.statusCode != 200) {
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = decoded['data'] as List<dynamic>? ?? [];
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map((e) => ProveedorItem(id: (e['id'] as num).toInt(), nombre: (e['nombre'] as String?) ?? ''))
+        .toList();
+  }
+
+  /// Obtiene una lista de compra existente para el proveedor o la crea si el proveedor
+  /// tiene "crear lista automáticamente" activado (ej. Mercadona). Si el proveedor no
+  /// tiene el flag (ej. Carrefour), el backend responde 422 y no se crea lista.
+  /// [fechaPrevista] opcional al crear lista nueva (formato YYYY-MM-DD).
+  Future<ListaCompraCabecera> getOrCreateListaForProveedor(int proveedorId, {String? fechaPrevista}) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    final body = <String, dynamic>{'proveedor_id': proveedorId};
+    if (fechaPrevista != null && fechaPrevista.isNotEmpty) body['fecha_prevista'] = fechaPrevista;
     final uri = Uri.parse('$_baseUrl/shopping/listas/obtener-o-crear-por-proveedor');
     final response = await http.post(
       uri,
       headers: _authHeaders(token),
-      body: jsonEncode({'proveedor_id': proveedorId}),
+      body: jsonEncode(body),
     );
     if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));
@@ -361,13 +498,14 @@ class ShoppingService {
     return ListaCompraCabecera.fromJson(data);
   }
 
-  /// Actualiza el estado de un ítem (completado/pendiente/no_disponible).
+  /// Actualiza el estado de un ítem (completado/pendiente/no_disponible) o asigna producto (para ítems solo ingrediente).
   Future<ListaCompraItem> updateListItem(
     int itemId, {
     bool? completado,
     String? estado,
     double? cantidad,
     int? unidadMedidaId,
+    int? productoId,
   }) async {
     final token = await _getToken();
     if (token == null || token.isEmpty) {
@@ -378,8 +516,9 @@ class ShoppingService {
     if (completado != null) body['completado'] = completado;
     if (cantidad != null) body['cantidad'] = cantidad;
     if (unidadMedidaId != null) body['unidad_medida_id'] = unidadMedidaId;
+    if (productoId != null) body['producto_id'] = productoId;
     if (body.isEmpty) {
-      throw Exception('Indica completado, estado, cantidad o unidad_medida_id.');
+      throw Exception('Indica completado, estado, cantidad, unidad_medida_id o producto_id.');
     }
     final uri = Uri.parse('$_baseUrl/shopping/listas/items/$itemId');
     final response = await http.patch(
@@ -388,6 +527,63 @@ class ShoppingService {
       body: jsonEncode(body),
     );
     if (response.statusCode != 200) {
+      if (response.statusCode == 422) {
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map<String, dynamic>) {
+            final provId = decoded['proveedor_id'];
+            final provNombre = decoded['proveedor_nombre'] as String?;
+            if (provId != null && provNombre != null && provNombre.isNotEmpty) {
+              final id = provId is int ? provId : (provId is num ? provId.toInt() : null);
+              if (id != null) {
+                throw ProductoOtroSupermercadoException(id, provNombre);
+              }
+            }
+          }
+        } catch (e) {
+          if (e is ProductoOtroSupermercadoException) rethrow;
+        }
+      }
+      throw Exception(_extractError(response.body, response.statusCode));
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = decoded['data'] as Map<String, dynamic>?;
+    if (data == null) throw Exception('Respuesta sin data.');
+    return ListaCompraItem.fromJson(data);
+  }
+
+  /// Crea un producto propuesto desde la lista (cuando no hay productos para el ingrediente)
+  /// y asigna ese producto al ítem. Devuelve el ítem actualizado.
+  Future<ListaCompraItem> proponerProducto(
+    int itemId, {
+    required String nombre,
+    required String ean,
+    int? proveedorId,
+    double? cantidadUnidad,
+    int? unidadMedidaId,
+    double? precio,
+    String? formatoProveedor,
+  }) async {
+    final token = await _getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Sesión no iniciada.');
+    }
+    final body = <String, dynamic>{
+      'nombre': nombre,
+      'ean': ean,
+    };
+    if (proveedorId != null && proveedorId > 0) body['proveedor_id'] = proveedorId;
+    if (cantidadUnidad != null) body['cantidad_unidad'] = cantidadUnidad;
+    if (unidadMedidaId != null && unidadMedidaId > 0) body['unidad_medida_id'] = unidadMedidaId;
+    if (precio != null) body['precio'] = precio;
+    if (formatoProveedor != null && formatoProveedor.isNotEmpty) body['formato_proveedor'] = formatoProveedor;
+    final uri = Uri.parse('$_baseUrl/shopping/listas/items/$itemId/proponer-producto');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(token),
+      body: jsonEncode(body),
+    );
+    if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception(_extractError(response.body, response.statusCode));
     }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
@@ -525,13 +721,23 @@ class ShoppingService {
     return ListaCompraItem.fromJson(data);
   }
 
-  /// Obtiene productos filtrados por ingrediente_id.
-  Future<List<ProductoSimple>> getProductosPorIngrediente(int ingredienteId) async {
+  /// Obtiene productos filtrados por ingrediente_id. Si [proveedorId] no es null,
+  /// solo devuelve productos de ese proveedor (ej. Mercadona) para listas de un super concreto.
+  Future<List<ProductoSimple>> getProductosPorIngrediente(
+    int ingredienteId, {
+    int? proveedorId,
+  }) async {
     final token = await _getToken();
     if (token == null || token.isEmpty) {
       throw Exception('Sesión no iniciada.');
     }
-    final uri = Uri.parse('$_baseUrl/productos?ingrediente_id=$ingredienteId');
+    var uri = Uri.parse('$_baseUrl/productos?ingrediente_id=$ingredienteId');
+    if (proveedorId != null && proveedorId > 0) {
+      uri = uri.replace(queryParameters: {
+        ...uri.queryParameters,
+        'proveedor_id': proveedorId.toString(),
+      });
+    }
     final response = await http.get(uri, headers: _authHeaders(token));
     if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));
@@ -544,13 +750,35 @@ class ShoppingService {
         .toList();
   }
 
-  /// Obtiene todas las unidades de medida con tipo y factor de conversión.
-  Future<List<UnidadMedidaCompleta>> getUnidadesMedida() async {
+  /// Obtiene unidades de medida. Si [ingredienteId] está definido, solo devuelve
+  /// las unidades de los tipos configurados para ese ingrediente (backend).
+  /// Resultados se cachean en memoria y se deduplican peticiones en curso.
+  Future<List<UnidadMedidaCompleta>> getUnidadesMedida({int? ingredienteId}) async {
+    final key = ingredienteId != null && ingredienteId > 0 ? ingredienteId.toString() : 'all';
+    final cached = _unidadesMedidaCache[key];
+    if (cached != null) return cached;
+    final inFlight = _unidadesMedidaInFlight[key];
+    if (inFlight != null) return inFlight;
+    final future = _fetchUnidadesMedida(ingredienteId: ingredienteId);
+    _unidadesMedidaInFlight[key] = future;
+    try {
+      final list = await future;
+      _unidadesMedidaCache[key] = list;
+      return list;
+    } finally {
+      _unidadesMedidaInFlight.remove(key);
+    }
+  }
+
+  Future<List<UnidadMedidaCompleta>> _fetchUnidadesMedida({int? ingredienteId}) async {
     final token = await _getToken();
     if (token == null || token.isEmpty) {
       throw Exception('Sesión no iniciada.');
     }
-    final uri = Uri.parse('$_baseUrl/unidades-medida');
+    var uri = Uri.parse('$_baseUrl/unidades-medida');
+    if (ingredienteId != null && ingredienteId > 0) {
+      uri = uri.replace(queryParameters: {'ingrediente_id': ingredienteId.toString()});
+    }
     final response = await http.get(uri, headers: _authHeaders(token));
     if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));
@@ -561,6 +789,12 @@ class ShoppingService {
         .whereType<Map<String, dynamic>>()
         .map((e) => UnidadMedidaCompleta.fromJson(e))
         .toList();
+  }
+
+  /// Invalida la caché de unidades de medida (p. ej. al cerrar sesión).
+  void clearUnidadesMedidaCache() {
+    _unidadesMedidaCache.clear();
+    _unidadesMedidaInFlight.clear();
   }
 }
 
@@ -592,12 +826,34 @@ class BulkEnviarResult {
   final String message;
   final int ingredientesAnadidos;
   final int recetasProcesadas;
+  final bool reenvioDisponible;
+  final int? proveedorSugeridoId;
 
   const BulkEnviarResult({
     required this.message,
     required this.ingredientesAnadidos,
     required this.recetasProcesadas,
+    this.reenvioDisponible = false,
+    this.proveedorSugeridoId,
   });
+}
+
+class DistribucionPreferenciaResult {
+  final int? listaPrincipalId;
+  final Map<int, int> listasPorProveedor;
+
+  const DistribucionPreferenciaResult({
+    required this.listaPrincipalId,
+    required this.listasPorProveedor,
+  });
+}
+
+/// Proveedor para selector "¿A qué supermercado vas?" (crear_lista_automatica = true).
+class ProveedorItem {
+  final int id;
+  final String nombre;
+
+  const ProveedorItem({required this.id, required this.nombre});
 }
 
 /// Formato (pack/unidad) del catálogo de proveedores para un producto.

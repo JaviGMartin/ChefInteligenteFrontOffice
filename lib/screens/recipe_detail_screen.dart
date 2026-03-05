@@ -20,11 +20,13 @@ class RecipeDetailScreen extends StatefulWidget {
     required this.recipe,
     this.fromPlanificador = false,
     this.scrollToComments = false,
+    this.fromNutricionista = false,
   });
 
   final Recipe recipe;
   final bool fromPlanificador;
   final bool scrollToComments;
+  final bool fromNutricionista;
 
   @override
   State<RecipeDetailScreen> createState() => _RecipeDetailScreenState();
@@ -33,6 +35,7 @@ class RecipeDetailScreen extends StatefulWidget {
 class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
   late Recipe _recipe;
   bool _loadingFullRecipe = false;
+  String? _loadError;
   final GlobalKey _commentsSectionKey = GlobalKey();
 
   @override
@@ -44,13 +47,17 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
 
   Future<void> _loadFullRecipe() async {
     if (_loadingFullRecipe) return;
-    setState(() => _loadingFullRecipe = true);
+    setState(() {
+      _loadingFullRecipe = true;
+      _loadError = null;
+    });
     try {
       final full = await RecipeService().getRecipe(_recipe.id);
       if (mounted) {
         setState(() {
           _recipe = full;
           _loadingFullRecipe = false;
+          _loadError = null;
         });
         if (widget.scrollToComments) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -63,11 +70,15 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _loadingFullRecipe = false);
+        final msg = e.toString().replaceFirst('Exception: ', '');
+        setState(() {
+          _loadingFullRecipe = false;
+          _loadError = msg;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('No se pudieron cargar los ingredientes: ${e.toString().replaceFirst('Exception: ', '')}'),
-            backgroundColor: AppColors.brandGreen.withOpacity(0.7),
+            content: Text('No se pudieron cargar los ingredientes: $msg'),
+            backgroundColor: Theme.of(context).colorScheme.error,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -408,6 +419,15 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                 ),
               ),
             RecipeStatusBadge(estado: recipe.estado),
+            if (widget.fromNutricionista)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Chip(
+                  avatar: Icon(Icons.person_outline, size: 18, color: Theme.of(context).colorScheme.primary),
+                  label: const Text('Receta de tu dietista'),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                ),
+              ),
             const SizedBox(height: 12),
             if (widget.fromPlanificador)
               Padding(
@@ -514,6 +534,27 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 16),
                 child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_loadError != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _loadError!,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: _loadFullRecipe,
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Reintentar'),
+                    ),
+                  ],
+                ),
               )
             else if (recipe.ingredientes.isEmpty)
               const Text('Sin ingredientes listados.')

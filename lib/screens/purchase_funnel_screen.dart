@@ -75,9 +75,11 @@ class _PurchaseFunnelScreenState extends State<PurchaseFunnelScreen> {
     final listaId = await showModalBottomSheet<int>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => _ModalSeleccionLista(
-        pendiente: p,
-        listas: listas,
+      builder: (ctx) => SafeArea(
+        child: _ModalSeleccionLista(
+          pendiente: p,
+          listas: listas,
+        ),
       ),
     );
     if (listaId == null || !mounted) return;
@@ -330,12 +332,18 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
             ? '${fechaSeleccionada!.year}-${fechaSeleccionada!.month.toString().padLeft(2, '0')}-${fechaSeleccionada!.day.toString().padLeft(2, '0')}'
             : null;
         final shopping = ShoppingService();
-        await shopping.crearLista(tituloController.text.trim(), fechaPrevista: fechaPrevista);
-        final nuevasListas = await shopping.getListas();
-        setState(() {
-          _listas = nuevasListas;
-        });
+        final nuevaLista = await shopping.crearLista(tituloController.text.trim(), fechaPrevista: fechaPrevista);
+        final eraListaVacia = widget.listas.isEmpty;
+        if (mounted) {
+          setState(() {
+            _listas = [nuevaLista, ..._listas];
+          });
+        }
         if (context.mounted) {
+          if (eraListaVacia) {
+            Navigator.of(context).pop(nuevaLista.id);
+            return;
+          }
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Lista "${tituloController.text.trim()}" creada.'), behavior: SnackBarBehavior.floating),
           );
@@ -402,7 +410,7 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              'No tienes listas activas.',
+                              'No tienes listas activas. Crea una y se añadirá este ingrediente.',
                               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   ),
@@ -412,7 +420,7 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
                             FilledButton.icon(
                               onPressed: _crearLista,
                               icon: const Icon(Icons.add),
-                              label: const Text('Crear lista'),
+                              label: const Text('Crear lista y añadir'),
                             ),
                           ],
                         ),

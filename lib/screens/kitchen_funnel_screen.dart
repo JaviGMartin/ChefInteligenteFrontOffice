@@ -6,18 +6,23 @@ import '../models/lista_compra.dart';
 import '../theme/app_colors.dart';
 import '../models/pendiente_compra.dart';
 import '../models/recipe.dart';
+import '../models/hogar.dart';
+import '../services/auth_service.dart';
 import '../services/hogar_service.dart';
-import '../services/recipe_service.dart';
 import '../services/shopping_service.dart';
+import '../services/recipe_service.dart';
 import '../state/kitchen_state.dart';
 import '../widgets/main_layout.dart';
 import '../widgets/recipe_semaforo.dart';
+import '../widgets/anadir_faltantes_dialog.dart';
 import '../widgets/star_rating.dart';
+import 'calendar_planner_screen.dart';
 import 'elaboracion_screen.dart';
+import 'purchase_funnel_screen.dart';
 import 'recipe_detail_screen.dart';
 import 'single_shopping_list_screen.dart';
 
-/// Flujo: Cocina → Listas compra → Ingredientes a productos → Compras. Catálogo en menú Recetas.
+/// Plan (Fase 3): solo "Por cocinar" (Cocina). Listas/Ingredientes a productos/Compras en Compra o en flujo "Añadir faltantes".
 /// Estado centralizado en [KitchenState].
 class KitchenFunnelScreen extends StatefulWidget {
   const KitchenFunnelScreen({super.key});
@@ -26,23 +31,11 @@ class KitchenFunnelScreen extends StatefulWidget {
   State<KitchenFunnelScreen> createState() => _KitchenFunnelScreenState();
 }
 
-class _KitchenFunnelScreenState extends State<KitchenFunnelScreen>
-    with TickerProviderStateMixin {
-  late TabController _tabController;
-
-  static const int _tabCocina = 0;
-  static const int _tabListasCompra = 1;
-  static const int _tabEmbudo = 2;
-  static const int _tabCompras = 3;
-
+class _KitchenFunnelScreenState extends State<KitchenFunnelScreen> {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
-    _tabController.addListener(_onTabChanged);
     hogarActivoIdNotifier.addListener(_onHogarActivoChanged);
-    // Cargar planificador al entrar: _onTabChanged solo se dispara al cambiar de pestaña,
-    // no en la carga inicial con Cocina seleccionada.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         context.read<KitchenState>().loadPlanificador();
@@ -52,21 +45,8 @@ class _KitchenFunnelScreenState extends State<KitchenFunnelScreen>
 
   @override
   void dispose() {
-    _tabController.removeListener(_onTabChanged);
-    _tabController.dispose();
     hogarActivoIdNotifier.removeListener(_onHogarActivoChanged);
     super.dispose();
-  }
-
-  void _onTabChanged() {
-    if (!mounted) return;
-    final state = context.read<KitchenState>();
-    if (_tabController.index == _tabCocina && !state.isLoadingPlanificador) {
-      state.loadPlanificador();
-    }
-    if (_tabController.index == _tabEmbudo && state.shoppingPendientes == null && !state.isLoadingPendientes) {
-      state.loadPendientes();
-    }
   }
 
   void _onHogarActivoChanged() {
@@ -78,36 +58,14 @@ class _KitchenFunnelScreenState extends State<KitchenFunnelScreen>
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
     return MainLayout(
-      title: 'Planificador',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          TabBar(
-            controller: _tabController,
-            labelColor: primary,
-            indicatorColor: primary,
-            isScrollable: true,
-            tabs: const [
-              Tab(text: 'Cocina'),
-              Tab(text: 'Listas compra'),
-              Tab(text: 'Ingredientes a productos'),
-              Tab(text: 'Compras'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _CocinaTab(onNavigateToEmbudo: () => _tabController.animateTo(_tabEmbudo)),
-                const _ListasCompraTab(),
-                const _EmbudoTab(),
-                const _ComprasTab(),
-              ],
-            ),
-          ),
-        ],
+      title: 'Plan',
+      child: _CocinaTab(
+        onNavigateToEmbudo: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const PurchaseFunnelScreen()),
+          );
+        },
       ),
     );
   }
@@ -122,6 +80,7 @@ class _CocinaTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<KitchenState>();
+    final canUseCalendar = AuthService.userNotifier.value?.esPremiumOGold ?? false;
 
     if (state.isLoadingPlanificador && state.planificadorRecipes == null) {
       return const Center(child: CircularProgressIndicator());
@@ -177,11 +136,35 @@ class _CocinaTab extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: FilledButton.icon(
-            onPressed: state.isLoadingPendientes ? null : () => _actualizarFaltantesYNavegar(context),
-            icon: state.isLoadingPendientes ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(LucideIcons.packageSearch, size: 20),
-            label: const Text('Enviar ingredientes faltantes a Ingredientes a productos'),
-            style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (canUseCalendar)
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const CalendarPlannerScreen()),
+                    );
+                  },
+                  icon: const Icon(LucideIcons.calendarDays, size: 20),
+                  label: const Text('Abrir calendario semanal'),
+                ),
+              if (canUseCalendar) const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: state.isLoadingPendientes ? null : () => _actualizarFaltantesYNavegar(context),
+                icon: state.isLoadingPendientes ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(LucideIcons.packageSearch, size: 20),
+                label: const Text('Enviar ingredientes faltantes a Ingredientes a productos'),
+                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+              ),
+              const SizedBox(height: 8),
+              Center(
+                child: TextButton.icon(
+                  onPressed: onNavigateToEmbudo,
+                  icon: const Icon(LucideIcons.listChecks, size: 18),
+                  label: const Text('Abrir Ingredientes a productos'),
+                ),
+              ),
+            ],
           ),
         ),
         Expanded(
@@ -279,11 +262,124 @@ class _CocinaTab extends StatelessWidget {
     final recipes = state.planificadorRecipes ?? [];
     if (recipes.isEmpty) return;
     final ids = recipes.map((r) => r.id).toList();
-    final shopping = context.read<ShoppingService>();
+    final shopping = ShoppingService();
     try {
       final result = await shopping.bulkEnviarAPendientes(ids);
       await state.loadPendientes();
       if (!context.mounted) return;
+      final pendientes = state.shoppingPendientes ?? [];
+      if (pendientes.isNotEmpty) {
+        final dialogResult = await showModalBottomSheet<AnadirFaltantesDialogResult>(
+          context: context,
+          isScrollControlled: true,
+          builder: (ctx) => AnadirFaltantesDialog(
+            onRepartir: () => Navigator.of(ctx).pop(const AnadirFaltantesDialogResult.repartir()),
+            onUnaLista: (proveedorId, fechaPrevista) => Navigator.of(ctx).pop(AnadirFaltantesDialogResult.unaLista(proveedorId, fechaPrevista)),
+            initialProveedorId: result.proveedorSugeridoId,
+          ),
+        );
+        if (!context.mounted) return;
+        if (dialogResult == null) return;
+        if (dialogResult.repartir) {
+          onNavigateToEmbudo?.call();
+          return;
+        }
+        if (dialogResult.proveedorId != null) {
+          try {
+            final distribucion = await shopping.distribuirPendientesPorPreferencia(
+              preferenciaProveedorId: dialogResult.proveedorId!,
+              pendienteIds: pendientes.map((p) => p.id).toList(),
+              fechaPrevista: dialogResult.fechaPrevista,
+            );
+            await state.loadPendientes();
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('${pendientes.length} ingrediente(s) añadidos según tu preferencia.'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+              final listaPrincipalId = distribucion.listaPrincipalId;
+              if (listaPrincipalId != null) {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => SingleShoppingListScreen(listaId: listaPrincipalId),
+                  ),
+                );
+              }
+            }
+          } catch (e) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(e.toString().replaceFirst('Exception: ', '')), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating),
+              );
+            }
+          }
+          return;
+        }
+      } else if (result.reenvioDisponible) {
+        final dialogResult = await showModalBottomSheet<AnadirFaltantesDialogResult>(
+          context: context,
+          isScrollControlled: true,
+          builder: (ctx) => AnadirFaltantesDialog(
+            onRepartir: () => Navigator.of(ctx).pop(const AnadirFaltantesDialogResult.repartir()),
+            onUnaLista: (proveedorId, fechaPrevista) => Navigator.of(ctx).pop(AnadirFaltantesDialogResult.unaLista(proveedorId, fechaPrevista)),
+            initialProveedorId: result.proveedorSugeridoId,
+          ),
+        );
+        if (!context.mounted) return;
+        if (dialogResult == null) return;
+        if (dialogResult.repartir) {
+          onNavigateToEmbudo?.call();
+          return;
+        }
+        if (dialogResult.proveedorId != null) {
+          try {
+            await shopping.bulkEnviarAPendientes(ids, forzarReenvio: true);
+            await state.loadPendientes();
+            if (!context.mounted) return;
+            final pendientesReenvio = state.shoppingPendientes ?? [];
+            if (pendientesReenvio.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(result.message.isNotEmpty ? result.message : 'No hay ingredientes nuevos que añadir.'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+              return;
+            }
+            final distribucion = await shopping.distribuirPendientesPorPreferencia(
+              preferenciaProveedorId: dialogResult.proveedorId!,
+              pendienteIds: pendientesReenvio.map((p) => p.id).toList(),
+              fechaPrevista: dialogResult.fechaPrevista,
+            );
+            await state.loadPendientes();
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('${pendientesReenvio.length} ingrediente(s) añadidos según tu preferencia.'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+              final listaPrincipalId = distribucion.listaPrincipalId;
+              if (listaPrincipalId != null) {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => SingleShoppingListScreen(listaId: listaPrincipalId),
+                  ),
+                );
+              }
+            }
+          } catch (e) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(e.toString().replaceFirst('Exception: ', '')), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating),
+              );
+            }
+          }
+          return;
+        }
+      }
       if (result.ingredientesAnadidos > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -291,16 +387,16 @@ class _CocinaTab extends StatelessWidget {
             behavior: SnackBarBehavior.floating,
           ),
         );
-        onNavigateToEmbudo?.call();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result.message.isNotEmpty ? result.message : 'No se añadió ningún ingrediente. Las recetas ya estaban en Ingredientes a productos o tienes todo el stock.'),
+            content: Text(result.message.isNotEmpty ? result.message : 'No hay ingredientes nuevos que añadir. Abriendo Ingredientes a productos.'),
             backgroundColor: AppColors.brandGreen.withOpacity(0.8),
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
+      onNavigateToEmbudo?.call();
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -309,6 +405,7 @@ class _CocinaTab extends StatelessWidget {
       }
     }
   }
+
 }
 
 /// Botón para iniciar elaboración. Verde: directo; Ámbar/Rojo: modal de confirmación.
@@ -779,7 +876,7 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
           ? pendiente.cantidadCompra.toInt().toString()
           : pendiente.cantidadCompra.toString(),
     );
-    _productoSeleccionadoId = pendiente.productoId;
+    _productoSeleccionadoId = pendiente.productoId ?? (pendiente.productoSugerido != null ? pendiente.productoSugerido!.id : null);
     _unidadSeleccionadaId = pendiente.unidadMedidaId;
     _cargarProductos();
     _cargarUnidades();
@@ -905,6 +1002,15 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
   }
 
   void _onTapLista(int listaId) {
+    if (_productos != null && _productos!.isNotEmpty && _productoSeleccionadoId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Elige un producto antes de añadir a la lista.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     final cantidadText = _cantidadController.text.trim();
     final cantidad = double.tryParse(cantidadText.replaceAll(',', '.'));
     Navigator.of(context).pop(<dynamic>[
@@ -965,20 +1071,37 @@ class _ModalSeleccionListaState extends State<_ModalSeleccionLista> {
               else if (_productos != null && _productos!.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: DropdownButtonFormField<int>(
-                    decoration: const InputDecoration(
-                      labelText: 'Producto',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    value: _productoSeleccionadoId,
-                    items: _productos!.map((p) {
-                      return DropdownMenuItem<int>(
-                        value: p.id,
-                        child: Text(p.displayNombre, overflow: TextOverflow.ellipsis),
-                      );
-                    }).toList(),
-                    onChanged: (val) => _onProductoSeleccionado(val),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<int>(
+                          decoration: InputDecoration(
+                            labelText: _productoSeleccionadoId == null && pendiente.productoSugerido == null
+                                ? 'Elegir producto (obligatorio)'
+                                : 'Producto',
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          value: _productoSeleccionadoId,
+                          items: _productos!.map((p) {
+                            return DropdownMenuItem<int>(
+                              value: p.id,
+                              child: Text(p.displayNombre, overflow: TextOverflow.ellipsis),
+                            );
+                          }).toList(),
+                          onChanged: (val) => _onProductoSeleccionado(val),
+                        ),
+                      ),
+                      if (_productoSeleccionadoId != null)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8, bottom: 4),
+                          child: TextButton(
+                            onPressed: () => setState(() => _productoSeleccionadoId = null),
+                            child: const Text('Cambiar'),
+                          ),
+                        ),
+                    ],
                   ),
                 )
               else

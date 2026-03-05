@@ -22,9 +22,11 @@ class RecipeListScreen extends StatefulWidget {
   State<RecipeListScreen> createState() => _RecipeListScreenState();
 }
 
-class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerProviderStateMixin {
+class _RecipeListScreenState extends State<RecipeListScreen> with TickerProviderStateMixin {
   late Future<List<Recipe>> _recipesFuture;
   late TabController _tabController;
+  int _tabCount = 2;
+  Future<List<Recipe>>? _nutricionistaFuture;
   String? _misRecetasEstadoFilter;
   bool _planificadorLoaded = false;
 
@@ -50,6 +52,24 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
     hogarActivoIdNotifier.addListener(_onHogarActivoChanged);
   }
 
+  void _ensureTabCount(int wantCount) {
+    if (wantCount == _tabCount) return;
+    setState(() {
+      final oldController = _tabController;
+      _tabCount = wantCount;
+      _tabController = TabController(length: _tabCount, vsync: this);
+      _tabController.addListener(() {
+        if (mounted) setState(() {});
+      });
+      oldController.dispose();
+      if (wantCount == 3) {
+        _nutricionistaFuture = RecipeService().fetchRecetasNutricionista();
+      } else {
+        _nutricionistaFuture = null;
+      }
+    });
+  }
+
   @override
   void dispose() {
     _tabController.dispose();
@@ -68,6 +88,9 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
   Future<void> _refreshRecipes() async {
     setState(() {
       _recipesFuture = RecipeService().fetchRecipes();
+      if (_nutricionistaFuture != null) {
+        _nutricionistaFuture = RecipeService().fetchRecetasNutricionista();
+      }
     });
     await _recipesFuture;
   }
@@ -85,8 +108,13 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
     return misRecetas.where((r) => r.estado == _misRecetasEstadoFilter).toList();
   }
 
-  List<Recipe> _comunidad(List<Recipe> all, int? currentUserId) {
-    return all.where((r) => r.userId != currentUserId).toList();
+  /// Recetas de otros (comunidad). Si [nutricionistaId] no es null (usuario Gold), se excluyen las recetas del dietista para que solo aparezcan en la pestaña "Recetas del Nutricionista".
+  List<Recipe> _comunidad(List<Recipe> all, int? currentUserId, int? nutricionistaId) {
+    return all.where((r) {
+      if (r.userId == currentUserId) return false;
+      if (nutricionistaId != null && r.userId == nutricionistaId) return false;
+      return true;
+    }).toList();
   }
 
   Future<void> _crearReceta(BuildContext context) async {
@@ -96,6 +124,44 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
     if (recipe != null && mounted) {
       _refreshRecipes();
     }
+  }
+
+  Widget _buildNutricionistaTab(Set<int> planificadorIds) {
+    final future = _nutricionistaFuture;
+    if (future == null) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.brandGreen),
+      );
+    }
+    return FutureBuilder<List<Recipe>>(
+      future: future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: AppColors.brandGreen),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                snapshot.error.toString(),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+        final recipes = snapshot.data ?? [];
+        return _RecipeTabList(
+          recipes: recipes,
+          showStatusBadge: true,
+          onRefresh: _refreshRecipes,
+          planificadorIds: planificadorIds,
+          fromNutricionista: true,
+        );
+      },
+    );
   }
 
   @override
@@ -113,6 +179,14 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
         valueListenable: AuthService.userNotifier,
         builder: (context, authUser, _) {
           final currentUserId = authUser?.id;
+          final nutricionistaId = authUser?.nutricionistaId;
+          final esGold = authUser?.esGold ?? false;
+          final wantTabCount = esGold ? 3 : 2;
+          if (wantTabCount != _tabCount && mounted) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && wantTabCount != _tabCount) _ensureTabCount(wantTabCount);
+            });
+          }
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -134,9 +208,10 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
                 controller: _tabController,
                 labelColor: Theme.of(context).colorScheme.primary,
                 indicatorColor: AppColors.brandGreen,
-                tabs: const [
-                  Tab(text: 'Mis Recetas'),
-                  Tab(text: 'Comunidad'),
+                tabs: [
+                  const Tab(text: 'Mis Recetas'),
+                  const Tab(text: 'Comunidad'),
+                  if (_tabController.length >= 3) const Tab(text: 'Recetas del Nutricionista'),
                 ],
               ),
               if (_tabController.index == 0)
@@ -204,11 +279,12 @@ class _RecipeListScreenState extends State<RecipeListScreen> with SingleTickerPr
                           planificadorIds: planificadorIds,
                         ),
                         _RecipeTabList(
-                          recipes: _comunidad(allRecipes, currentUserId),
+                          recipes: _comunidad(allRecipes, currentUserId, nutricionistaId),
                           showStatusBadge: true,
                           onRefresh: _refreshRecipes,
                           planificadorIds: planificadorIds,
                         ),
+                        if (_tabController.length >= 3) _buildNutricionistaTab(planificadorIds),
                       ],
                     );
                   },
@@ -228,12 +304,14 @@ class _RecipeTabList extends StatelessWidget {
     this.showStatusBadge = true,
     this.onRefresh,
     this.planificadorIds = const {},
+    this.fromNutricionista = false,
   });
 
   final List<Recipe> recipes;
   final bool showStatusBadge;
   final Future<void> Function()? onRefresh;
   final Set<int> planificadorIds;
+  final bool fromNutricionista;
 
   @override
   Widget build(BuildContext context) {
@@ -287,7 +365,10 @@ class _RecipeTabList extends StatelessWidget {
           onTap: () async {
             await Navigator.of(context).push<void>(
               MaterialPageRoute<void>(
-                builder: (_) => RecipeDetailScreen(recipe: recipe),
+                builder: (_) => RecipeDetailScreen(
+                  recipe: recipe,
+                  fromNutricionista: fromNutricionista,
+                ),
               ),
             );
             onRefresh?.call();

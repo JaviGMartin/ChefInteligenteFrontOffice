@@ -16,10 +16,17 @@ class GlobalPantryScreen extends StatefulWidget {
 class _GlobalPantryScreenState extends State<GlobalPantryScreen> {
   late Future<List<Contenedor>> _future;
 
+  /// Carga contenedores solo del hogar activo para no mostrar los de otra casa.
+  Future<List<Contenedor>> _loadContenedoresDelHogarActivo() async {
+    final result = await HogarService().fetchHogares();
+    final hogarId = result.hogarActivoId;
+    return StockService().fetchContenedores(hogarId: hogarId);
+  }
+
   @override
   void initState() {
     super.initState();
-    _future = StockService().fetchContenedores();
+    _future = _loadContenedoresDelHogarActivo();
     hogarActivoIdNotifier.addListener(_onHogarActivoChanged);
   }
 
@@ -31,7 +38,9 @@ class _GlobalPantryScreenState extends State<GlobalPantryScreen> {
 
   void _onHogarActivoChanged() {
     if (mounted) {
-      setState(() => _future = StockService().fetchContenedores());
+      setState(() {
+        _future = _loadContenedoresDelHogarActivo();
+      });
     }
   }
 
@@ -73,7 +82,9 @@ class _GlobalPantryScreenState extends State<GlobalPantryScreen> {
       await stock.createContenedor(hogarId: hogarId, nombre: 'Congelador', tipo: 'congelador');
       await stock.createContenedor(hogarId: hogarId, nombre: 'Despensa', tipo: 'despensa');
       if (mounted) {
-        setState(() => _future = StockService().fetchContenedores());
+        setState(() {
+          _future = _loadContenedoresDelHogarActivo();
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Contenedores básicos creados.')),
         );
@@ -109,7 +120,7 @@ class _GlobalPantryScreenState extends State<GlobalPantryScreen> {
                     TextButton(
                       onPressed: () {
                         setState(() {
-                          _future = StockService().fetchContenedores();
+                          _future = _loadContenedoresDelHogarActivo();
                         });
                       },
                       child: const Text('Reintentar'),

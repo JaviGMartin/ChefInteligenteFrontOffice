@@ -17,7 +17,13 @@ class StockService {
     return 'http://192.168.1.39:8000/api';
   }
 
-  Future<List<Contenedor>> fetchContenedores({int? hogarId}) async {
+  final Map<String, List<Contenedor>> _contenedoresCache = {};
+
+  Future<List<Contenedor>> fetchContenedores({int? hogarId, bool forceRefresh = false}) async {
+    final key = hogarId?.toString() ?? 'all';
+    if (!forceRefresh && _contenedoresCache.containsKey(key)) {
+      return _contenedoresCache[key]!;
+    }
     final token = await _getToken();
     final query = hogarId != null ? '?hogar_id=$hogarId' : '';
     final uri = Uri.parse('$_baseUrl/contenedores$query');
@@ -29,10 +35,17 @@ class StockService {
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final data = decoded['data'] as List<dynamic>? ?? [];
-    return data
+    final list = data
         .whereType<Map<String, dynamic>>()
         .map((item) => Contenedor.fromJson(item))
         .toList();
+    _contenedoresCache[key] = list;
+    return list;
+  }
+
+  /// Invalida la caché de contenedores (tras crear, editar o eliminar contenedor/inventario).
+  void clearContenedoresCache() {
+    _contenedoresCache.clear();
   }
 
   Future<List<Inventario>> fetchInventarios({
@@ -93,10 +106,10 @@ class StockService {
         'tipo': tipo,
       }),
     );
-
     if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));
     }
+    clearContenedoresCache();
   }
 
   Future<void> createContenedor({
@@ -119,6 +132,7 @@ class StockService {
     if (response.statusCode != 201) {
       throw Exception(_extractError(response.body, response.statusCode));
     }
+    clearContenedoresCache();
   }
 
   Future<void> deleteContenedor(int id) async {
@@ -129,6 +143,7 @@ class StockService {
     if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));
     }
+    clearContenedoresCache();
   }
 
   Future<void> updateInventario({
@@ -156,6 +171,7 @@ class StockService {
     if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));
     }
+    clearContenedoresCache();
   }
 
   Future<void> deleteInventario(int id) async {
@@ -166,6 +182,7 @@ class StockService {
     if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));
     }
+    clearContenedoresCache();
   }
 
   Future<String> _getToken() async {

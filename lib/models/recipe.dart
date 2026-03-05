@@ -239,6 +239,28 @@ class Recipe {
     this.valoraciones,
   });
 
+  /// Crea un Recipe mínimo para abrir RecipeDetailScreen; la pantalla cargará el detalle completo con getRecipe(id).
+  static Recipe minimalFromPlanificacionReceta({
+    required int id,
+    required String titulo,
+    String? imagenUrl,
+  }) {
+    return Recipe(
+      id: id,
+      titulo: titulo,
+      imagenUrl: imagenUrl,
+      descripcion: null,
+      tiempoPreparacion: null,
+      dificultad: null,
+      porcionesBase: null,
+      herramientas: null,
+      estado: null,
+      averageRating: null,
+      userId: null,
+      ingredientes: const [],
+    );
+  }
+
   factory Recipe.fromJson(Map<String, dynamic> json) {
     final ingredientesJson = (json['ingredientes'] as List<dynamic>?) ?? [];
     final faltantesJson = (json['ingredientes_faltantes'] as List<dynamic>?) ?? [];

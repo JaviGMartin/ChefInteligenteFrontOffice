@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/auth_service.dart';
+import 'home_screen.dart';
 import 'home_setup_screen.dart';
 import 'login_screen.dart';
-import 'recipe_list_screen.dart';
 
 class AppStartScreen extends StatefulWidget {
   const AppStartScreen({super.key});
@@ -36,7 +36,7 @@ class _AppStartScreenState extends State<AppStartScreen> {
       }
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => hasHogar ? const RecipeListScreen() : const HomeSetupScreen(),
+          builder: (_) => hasHogar ? const HomeScreen() : const HomeSetupScreen(),
         ),
       );
     } catch (error) {

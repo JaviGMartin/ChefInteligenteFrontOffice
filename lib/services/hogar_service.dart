@@ -20,7 +20,13 @@ class HogarService {
     return 'http://192.168.1.39:8000/api';
   }
 
-  Future<HogaresResult> fetchHogares() async {
+  HogaresResult? _hogaresCache;
+
+  /// Obtiene hogares del usuario. Usa caché en memoria; [forceRefresh] true para ignorar caché.
+  Future<HogaresResult> fetchHogares({bool forceRefresh = false}) async {
+    if (!forceRefresh && _hogaresCache != null) {
+      return _hogaresCache!;
+    }
     final token = await _getToken();
     final uri = Uri.parse('$_baseUrl/hogares');
     final response = await http.get(
@@ -45,11 +51,17 @@ class HogarService {
     final hogarActivoId = (decoded['hogar_activo_id'] as num?)?.toInt();
     final puedeCambiarHogarActivo = decoded['puede_cambiar_hogar_activo'] as bool? ?? true;
 
-    return HogaresResult(
+    _hogaresCache = HogaresResult(
       hogares: hogares,
       hogarActivoId: hogarActivoId,
       puedeCambiarHogarActivo: puedeCambiarHogarActivo,
     );
+    return _hogaresCache!;
+  }
+
+  /// Invalida la caché de hogares (tras crear, unirse, cambiar activo, eliminar hogar).
+  void clearHogaresCache() {
+    _hogaresCache = null;
   }
 
   Future<int?> crearHogar({
@@ -77,6 +89,7 @@ class HogarService {
 
     final hogarId = _extractHogarId(response.body);
     await _storeHogarId(hogarId, nombre: _extractHogarNombre(response.body));
+    clearHogaresCache();
     return hogarId;
   }
 
@@ -96,6 +109,7 @@ class HogarService {
     final hogarId = _extractHogarId(response.body);
     final nombre = _extractHogarNombre(response.body);
     await _storeHogarId(hogarId, nombre: nombre);
+    clearHogaresCache();
   }
 
   Future<int?> createHogar(String nombre) => crearHogar(nombre: nombre);
@@ -118,6 +132,7 @@ class HogarService {
     final nombre = _extractHogarNombre(response.body);
     await _storeHogarId(hogarId, nombre: nombre);
     hogarActivoIdNotifier.value = hogarId;
+    clearHogaresCache();
     await AuthService().fetchUser(forceRefresh: true);
   }
 
@@ -136,6 +151,7 @@ class HogarService {
     if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));
     }
+    clearHogaresCache();
 
     // No actualizar hogar activo (SharedPreferences): principal y activo están desacoplados.
     hogaresDataChangedNotifier.value = hogaresDataChangedNotifier.value + 1;
@@ -175,6 +191,7 @@ class HogarService {
     if (response.statusCode != 200) {
       throw Exception(_extractError(response.body, response.statusCode));
     }
+    clearHogaresCache();
   }
 
   Future<int?> getHogarIdActual() async {

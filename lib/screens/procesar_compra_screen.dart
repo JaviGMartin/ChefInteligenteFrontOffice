@@ -51,31 +51,19 @@ class _ProcesarCompraScreenState extends State<ProcesarCompraScreen> {
     });
     try {
       final shopping = context.read<ShoppingService>();
-      // Incluir listas activas Y pendientes de procesar (la lista puede venir de "Pend. procesar").
-      final activas = await shopping.getListas(archivada: false);
-      final pendientes = await shopping.getListas(archivada: false, pendienteProcesar: true);
-      final listas = [...activas, ...pendientes];
-      ListaCompraCabecera? lista;
-      try {
-        lista = listas.firstWhere((l) => l.id == widget.listaId);
-      } catch (_) {
-        lista = null;
-      }
-      if (lista == null) {
-        setState(() {
-          _error = Exception('Lista no encontrada');
-          _loading = false;
-        });
-        return;
-      }
+      final stock = StockService();
+      final results = await Future.wait([
+        shopping.getLista(widget.listaId),
+        stock.fetchContenedores(hogarId: widget.hogarId),
+      ]);
+      final lista = results[0] as ListaCompraCabecera;
+      final contenedores = results[1] as List<Contenedor>;
       final completados = lista.items
           .where((i) =>
               (i.estado == 'completado' || i.completado == true) &&
-              i.estado != 'procesado')
+              i.estado != 'procesado' &&
+              i.productoId != null)
           .toList();
-
-      final contenedores =
-          await StockService().fetchContenedores(hogarId: widget.hogarId);
 
       if (!mounted) return;
       setState(() {

@@ -2,17 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
-import '../models/contenedor.dart';
 import '../theme/app_colors.dart';
 import '../models/lista_compra.dart';
 import '../services/shopping_service.dart';
-import '../services/stock_service.dart';
-import '../state/kitchen_state.dart';
 import '../widgets/main_layout.dart';
+import 'single_shopping_list_screen.dart';
 
-/// Pantalla de listas de compra con pestañas (ej. Mercadona, Carnicería).
-/// Permite marcar ítems completados/pendientes y finalizar compra (mover al inventario).
-/// [initialListaId] abre directamente la pestaña de esa lista si existe.
+/// Pantalla de listas de compra: Activas (incluye pendientes de procesar) e Historial (archivadas).
+/// Una lista sigue en Activas cuando pasa a «pendiente de procesar»; en su detalle se muestran los botones Procesar / Volver a activas / Archivar.
 class ShoppingListsScreen extends StatefulWidget {
   const ShoppingListsScreen({super.key, this.initialListaId});
 
@@ -24,103 +21,135 @@ class ShoppingListsScreen extends StatefulWidget {
 
 class _ShoppingListsScreenState extends State<ShoppingListsScreen>
     with TickerProviderStateMixin {
-  TabController? _tabController;
+  late TabController _sectionTabController;
   Future<List<ListaCompraCabecera>>? _listasFuture;
+  Future<List<ListaCompraCabecera>>? _listasArchivadasFuture;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 1, vsync: this);
+    _sectionTabController = TabController(length: 2, vsync: this);
   }
 
   @override
   void dispose() {
-    _tabController?.dispose();
+    _sectionTabController.dispose();
     super.dispose();
-  }
-
-  bool _listaTieneCompletados(ListaCompraCabecera lista) {
-    return lista.items.any((i) =>
-        (i.estado == 'completado' || i.completado == true) &&
-        i.estado != 'procesado');
   }
 
   void _refresh() {
     if (!mounted) return;
+    final svc = context.read<ShoppingService>();
     setState(() {
-      _listasFuture = context.read<ShoppingService>().getListas();
+      _listasFuture = _cargarListasActivas(svc);
+      _listasArchivadasFuture = svc.getListas(archivada: true);
     });
   }
 
-  Future<void> _finalizarCompra(
+  /// Activas + pendientes de procesar unidos (todas las listas no archivadas).
+  Future<List<ListaCompraCabecera>> _cargarListasActivas(ShoppingService svc) async {
+    final results = await Future.wait([
+      svc.getListas(),
+      svc.getListas(archivada: false, pendienteProcesar: true),
+    ]);
+    final activas = results[0];
+    final pendientes = results[1];
+    final idsPendientes = pendientes.map((l) => l.id).toSet();
+    final soloActivas = activas.where((l) => !idsPendientes.contains(l.id)).toList();
+    return [...soloActivas, ...pendientes];
+  }
+
+  Future<void> _archivarLista(
     BuildContext context,
     ListaCompraCabecera lista,
     ShoppingService shoppingService,
   ) async {
-    final completados = lista.items
-        .where((i) =>
-            i.estado == 'completado' || i.completado == true)
-        .where((i) => i.estado != 'procesado')
-        .toList();
-    if (completados.isEmpty) {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Archivar lista'),
+        content: Text(
+          lista.titulo.isEmpty
+              ? '¿Archivar esta lista? Saldrá del listado activo.'
+              : '¿Archivar "${lista.titulo}"? Saldrá del listado activo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Archivar'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !context.mounted) return;
+    try {
+      await shoppingService.archivarLista(lista.id);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Marca al menos un producto como comprado para finalizar.'),
-            backgroundColor: AppColors.brandGreen.withOpacity(0.8),
+          const SnackBar(
+            content: Text('Lista archivada'),
             behavior: SnackBarBehavior.floating,
           ),
         );
+        _refresh();
       }
-      return;
-    }
-    List<Contenedor> contenedores;
-    try {
-      contenedores = await StockService().fetchContenedores(hogarId: lista.hogarId);
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al cargar contenedores: ${e.toString().replaceFirst('Exception: ', '')}'),
+            content: Text(e.toString().replaceFirst('Exception: ', '')),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
-      return;
     }
-    if (contenedores.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Crea al menos un contenedor en Despensa para poder finalizar la compra.'),
-            backgroundColor: AppColors.brandGreen.withOpacity(0.8),
-            behavior: SnackBarBehavior.floating,
+  }
+
+  Future<void> _eliminarListaArchivada(
+    BuildContext context,
+    ListaCompraCabecera lista,
+    ShoppingService shoppingService,
+  ) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar lista'),
+        content: Text(
+          lista.titulo.isEmpty
+              ? '¿Eliminar definitivamente esta lista? Esta acción no se puede deshacer.'
+              : '¿Eliminar definitivamente "${lista.titulo}"? Esta acción no se puede deshacer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
           ),
-        );
-      }
-      return;
-    }
-    final defaultContenedorId = completados.first.contenedorId ?? contenedores.first.id;
-    final lineas = completados
-        .map((item) => ProcesarCompraLinea(
-              listaCompraItemId: item.id,
-              contenedorId: item.contenedorId ?? defaultContenedorId,
-              cantidad: item.cantidadCompra > 0 ? item.cantidadCompra : item.cantidad,
-            ))
-        .toList();
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !context.mounted) return;
     try {
-      final result = await shoppingService.procesarCompra(lineas);
+      await shoppingService.eliminarLista(lista.id);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result.message),
-            backgroundColor: AppColors.brandGreen,
+          const SnackBar(
+            content: Text('Lista eliminada'),
             behavior: SnackBarBehavior.floating,
           ),
         );
         _refresh();
-        context.read<KitchenState>().refreshAfterPurchase();
       }
     } catch (e) {
       if (context.mounted) {
@@ -138,291 +167,279 @@ class _ShoppingListsScreenState extends State<ShoppingListsScreen>
   @override
   Widget build(BuildContext context) {
     final shoppingService = context.watch<ShoppingService>();
-    _listasFuture ??= shoppingService.getListas();
-    return FutureBuilder<List<ListaCompraCabecera>>(
-        future: _listasFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      LucideIcons.alertCircle,
-                      size: 48,
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      snapshot.error.toString().replaceFirst('Exception: ', ''),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: _refresh,
-                      icon: const Icon(LucideIcons.refreshCw),
-                      label: const Text('Reintentar'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-          final listas = snapshot.data ?? [];
-          if (listas.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      LucideIcons.listChecks,
-                      size: 64,
-                      color: Theme.of(context).colorScheme.outline,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No hay listas de compra',
-                      style: Theme.of(context).textTheme.titleMedium,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Añade productos desde Ingredientes a productos o crea listas en la web.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-          if (_tabController == null ||
-              _tabController!.length != listas.length) {
-            _tabController?.dispose();
-            final initialIndex = widget.initialListaId != null
-                ? listas.indexWhere((l) => l.id == widget.initialListaId).clamp(0, listas.length - 1)
-                : 0;
-            final controller = TabController(
-              length: listas.length,
-              initialIndex: initialIndex >= 0 ? initialIndex : 0,
-              vsync: this,
-            );
-            controller.addListener(() => setState(() {}));
-            _tabController = controller;
-          }
-          final currentIndex = _tabController!.index;
-          final listaActual = currentIndex < listas.length
-              ? listas[currentIndex]
-              : null;
-          final showFinalizar =
-              listaActual != null && _listaTieneCompletados(listaActual);
-          final listToFinalize = listaActual;
+    _listasFuture ??= _cargarListasActivas(shoppingService);
+    _listasArchivadasFuture ??= shoppingService.getListas(archivada: true);
 
-          return MainLayout(
-            title: 'Listas de compra',
-            actions: [
-              if (showFinalizar && listToFinalize != null)
-                IconButton(
-                  tooltip: 'Finalizar compra',
-                  icon: const Icon(LucideIcons.shoppingCart),
-                  onPressed: () =>
-                      _finalizarCompra(context, listToFinalize, shoppingService),
-                ),
+    return MainLayout(
+      title: 'Compra',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TabBar(
+            controller: _sectionTabController,
+            labelColor: Theme.of(context).colorScheme.primary,
+            indicatorColor: Theme.of(context).colorScheme.primary,
+            tabs: const [
+              Tab(text: 'Activas'),
+              Tab(text: 'Historial'),
             ],
-            child: Column(
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _sectionTabController,
               children: [
-                TabBar(
-                  controller: _tabController,
-                  tabs: listas
-                      .map((l) => Tab(
-                            icon: const Icon(LucideIcons.list, size: 20),
-                            text: l.titulo.isEmpty ? 'Lista ${l.id}' : l.titulo,
-                          ))
-                      .toList(),
-                ),
-                Expanded(
-                  child: TabBarView(
-                    controller: _tabController!,
-                    children: listas.map((lista) {
-                      return _ListaTab(
-                        key: ValueKey<int>(lista.id),
-                        lista: lista,
-                        shoppingService: shoppingService,
-                        onRefresh: _refresh,
-                      );
-                    }).toList(),
+                _buildActivasContent(shoppingService),
+                _buildHistorialContent(shoppingService),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActivasContent(ShoppingService shoppingService) {
+    return FutureBuilder<List<ListaCompraCabecera>>(
+      future: _listasFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(
+            child: CircularProgressIndicator(color: AppColors.brandGreen),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    LucideIcons.alertCircle,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.error,
                   ),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-  }
-}
-
-class _ListaTab extends StatelessWidget {
-  const _ListaTab({
-    super.key,
-    required this.lista,
-    required this.shoppingService,
-    required this.onRefresh,
-  });
-
-  final ListaCompraCabecera lista;
-  final ShoppingService shoppingService;
-  final VoidCallback onRefresh;
-
-  Future<void> _toggleItem(
-    BuildContext context,
-    ListaCompraItem item,
-    bool newCompletado,
-  ) async {
-    try {
-      await shoppingService.updateListItem(item.id, completado: newCompletado);
-      onRefresh();
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final items = lista.items;
-
-    return items.isEmpty
-        ? Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  LucideIcons.packageOpen,
-                  size: 48,
-                  color: Theme.of(context).colorScheme.outline,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Sin productos en esta lista',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ),
-          )
-        : ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: items.length,
-            itemBuilder: (context, index) {
-              final item = items[index];
-              final isCompletado = item.completado == true ||
-                  item.estado == 'completado';
-              final isProcesado = item.estado == 'procesado';
-
-              return _ListItemTile(
-                item: item,
-                isCompletado: isCompletado,
-                isProcesado: isProcesado,
-                onToggle: isProcesado
-                    ? null
-                    : (v) => _toggleItem(context, item, v),
-              );
-            },
-          );
-  }
-}
-
-class _ListItemTile extends StatelessWidget {
-  const _ListItemTile({
-    required this.item,
-    required this.isCompletado,
-    required this.isProcesado,
-    this.onToggle,
-  });
-
-  final ListaCompraItem item;
-  final bool isCompletado;
-  final bool isProcesado;
-  final void Function(bool)? onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final nombre = item.producto?.nombre ?? 'Producto #${item.id}';
-    final cantidad = item.cantidadCompra > 0
-        ? item.cantidadCompra
-        : item.cantidad;
-    final unidad = item.unidadMedida?.abreviatura ?? item.unidadMedida?.nombre ?? '';
-    final cantidadStr = unidad.isNotEmpty
-        ? '${cantidad == cantidad.truncate() ? cantidad.toInt() : cantidad} $unidad'
-        : cantidad.toString();
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: isCompletado && !isProcesado
-            ? AppColors.brandGreen.withOpacity(0.12)
-            : (isProcesado
-                ? Theme.of(context).colorScheme.surfaceContainerHighest
-                : null),
-        borderRadius: BorderRadius.circular(12),
-        border: isCompletado && !isProcesado
-            ? Border.all(color: AppColors.brandGreen.withOpacity(0.4), width: 1)
-            : null,
-      ),
-      child: ListTile(
-        leading: isProcesado
-            ? Icon(LucideIcons.checkCircle,
-                color: Theme.of(context).colorScheme.primary, size: 28)
-            : Checkbox(
-                value: isCompletado,
-                onChanged: onToggle == null ? null : (v) => onToggle!(v ?? false),
-                activeColor: AppColors.brandGreen,
+                  const SizedBox(height: 16),
+                  Text(
+                    snapshot.error.toString().replaceFirst('Exception: ', ''),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: _refresh,
+                    icon: const Icon(LucideIcons.refreshCw),
+                    label: const Text('Reintentar'),
+                  ),
+                ],
               ),
-        title: Text(
-          nombre,
-          style: TextStyle(
-            decoration: isCompletado ? TextDecoration.lineThrough : null,
-            decorationColor: Theme.of(context).colorScheme.onSurfaceVariant,
-            color: isProcesado
-                ? Theme.of(context).colorScheme.onSurfaceVariant
-                : null,
-          ),
-        ),
-        subtitle: Text(
-          cantidadStr,
-          style: TextStyle(
-            decoration: isCompletado ? TextDecoration.lineThrough : null,
-            fontSize: 12,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-        trailing: isProcesado
-            ? Text(
-                'En inventario',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
+            ),
+          );
+        }
+        final listas = snapshot.data ?? [];
+        if (listas.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    LucideIcons.listChecks,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No hay listas de compra',
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Añade productos desde Plan (Ingredientes a productos) o crea una lista al usar «Añadir faltantes» en una receta.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          itemCount: listas.length,
+          itemBuilder: (context, index) {
+            final lista = listas[index];
+            final titulo = lista.titulo.isEmpty ? 'Lista ${lista.id}' : lista.titulo;
+            final numItems = lista.items.length;
+            final subtitle = numItems > 0
+                ? '$numItems ${numItems == 1 ? 'producto' : 'productos'}'
+                : (lista.fechaPrevista ?? '');
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: const Icon(LucideIcons.listChecks, color: AppColors.brandGreen),
+                title: Text(titulo),
+                subtitle: subtitle.isNotEmpty ? Text(subtitle) : null,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    PopupMenuButton<String>(
+                      icon: const Icon(LucideIcons.moreVertical),
+                      tooltip: 'Opciones',
+                      onSelected: (value) {
+                        if (value == 'archivar') {
+                          _archivarLista(context, lista, shoppingService);
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'archivar',
+                          child: Row(
+                            children: [
+                              Icon(LucideIcons.archive, size: 20),
+                              SizedBox(width: 8),
+                              Text('Archivar lista'),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-              )
-            : null,
-      ),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => SingleShoppingListScreen(
+                        listaId: lista.id,
+                        pendienteDeProcesar: lista.pendienteProcesar,
+                      ),
+                    ),
+                  ).then((_) => _refresh());
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildHistorialContent(ShoppingService shoppingService) {
+    return FutureBuilder<List<ListaCompraCabecera>>(
+      future: _listasArchivadasFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(
+            child: CircularProgressIndicator(color: AppColors.brandGreen),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    snapshot.error.toString().replaceFirst('Exception: ', ''),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: _refresh,
+                    icon: const Icon(LucideIcons.refreshCw),
+                    label: const Text('Reintentar'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        final listas = snapshot.data ?? [];
+        if (listas.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    LucideIcons.archive,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No hay listas archivadas',
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          itemCount: listas.length,
+          itemBuilder: (context, index) {
+            final lista = listas[index];
+            final titulo = lista.titulo.isEmpty ? 'Lista ${lista.id}' : lista.titulo;
+            final fecha = lista.fechaProcesado ?? lista.fechaPrevista ?? '';
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: const Icon(LucideIcons.listChecks, color: AppColors.brandBlue),
+                title: Text(titulo),
+                subtitle: fecha.isNotEmpty ? Text(fecha) : null,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    PopupMenuButton<String>(
+                      icon: const Icon(LucideIcons.moreVertical),
+                      tooltip: 'Opciones',
+                      onSelected: (value) {
+                        if (value == 'eliminar') {
+                          _eliminarListaArchivada(context, lista, shoppingService);
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'eliminar',
+                          child: Row(
+                            children: [
+                              Icon(LucideIcons.trash2, size: 20),
+                              SizedBox(width: 8),
+                              Text('Eliminar lista'),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => SingleShoppingListScreen(
+                        listaId: lista.id,
+                        readOnly: true,
+                      ),
+                    ),
+                  ).then((_) => _refresh());
+                },
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

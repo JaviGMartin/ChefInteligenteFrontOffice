@@ -17,6 +17,7 @@ import '../screens/recipe_list_screen.dart';
 import '../screens/kitchen_funnel_screen.dart';
 import '../screens/support_screen.dart';
 import '../screens/team_management_screen.dart';
+import '../screens/home_screen.dart';
 import '../services/incidencia_service.dart';
 import '../theme/app_colors.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -62,7 +63,7 @@ class _AppDrawerState extends State<AppDrawer> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Con el plan Free solo puedes usar el hogar principal. Márcalo como principal en la web si quieres cambiarlo.',
+              'Con el plan Free solo puedes usar el hogar principal.',
             ),
             duration: Duration(seconds: 4),
           ),
@@ -385,23 +386,77 @@ class _AppDrawerState extends State<AppDrawer> {
             ),
           ),
           const Divider(height: 1),
-          ListTile(
-            leading: Icon(Icons.person_outline, color: primary),
-            title: Text('Mi Perfil', style: TextStyle(color: primary)),
+          // Fase 2: orden Inicio → Inventario → Recetas → Plan → Compra (cada punto = una necesidad: qué tengo, qué quiero cocinar, etc.)
+          _DrawerTile(
+            leading: Icon(Icons.dashboard_outlined, color: primary),
+            title: 'Inicio',
+            subtitle: 'Tu resumen: qué tienes y qué puedes cocinar',
+            primary: primary,
             onTap: () {
               Navigator.of(context).pop();
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const UserProfileScreen()),
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const HomeScreen()),
               );
             },
           ),
+          _DrawerTile(
+            leading: Icon(Icons.kitchen, color: primary),
+            title: 'Inventario',
+            subtitle: 'Qué tienes en nevera y despensa',
+            primary: primary,
+            onTap: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const GlobalPantryScreen()),
+              );
+            },
+          ),
+          _DrawerTile(
+            leading: Icon(Icons.restaurant, color: primary),
+            title: 'Recetas',
+            subtitle: 'Descubre qué quieres cocinar',
+            primary: primary,
+            onTap: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const RecipeListScreen()),
+              );
+            },
+          ),
+          _DrawerTile(
+            leading: Icon(LucideIcons.filter, color: primary),
+            title: 'Plan',
+            subtitle: 'Qué puedes cocinar con lo que tienes',
+            primary: primary,
+            onTap: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const KitchenFunnelScreen()),
+              );
+            },
+          ),
+          _DrawerTile(
+            leading: Icon(Icons.list_alt, color: primary),
+            title: 'Compra',
+            subtitle: 'Listas por supermercado',
+            primary: primary,
+            onTap: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const ShoppingListsScreen()),
+              );
+            },
+          ),
+          // Mi Hogar: solo Mis Casas y Mi Equipo (Fase 2)
           ExpansionTile(
             leading: Icon(Icons.home, color: primary),
             title: Text('Mi Hogar', style: TextStyle(color: primary)),
             children: [
-              ListTile(
+              _DrawerTile(
                 leading: Icon(Icons.home_work, color: primary),
-                title: Text('Mis Casas', style: TextStyle(color: primary)),
+                title: 'Mis Casas',
+                subtitle: 'Hogares donde vives',
+                primary: primary,
                 onTap: () {
                   Navigator.of(context).pop();
                   Navigator.of(context).pushReplacement(
@@ -409,9 +464,11 @@ class _AppDrawerState extends State<AppDrawer> {
                   );
                 },
               ),
-              ListTile(
+              _DrawerTile(
                 leading: Icon(Icons.people_alt_outlined, color: primary),
-                title: Text('Mi Equipo', style: TextStyle(color: primary)),
+                title: 'Mi Equipo',
+                subtitle: 'Personas con las que compartes hogar',
+                primary: primary,
                 onTap: () {
                   Navigator.of(context).pop();
                   Navigator.of(context).pushReplacement(
@@ -419,54 +476,17 @@ class _AppDrawerState extends State<AppDrawer> {
                   );
                 },
               ),
-              ListTile(
-                leading: Icon(Icons.kitchen, color: primary),
-                title: Text('Despensa', style: TextStyle(color: primary)),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (_) => const GlobalPantryScreen()),
-                  );
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.shopping_cart_outlined, color: primary),
-                title: Text('Ingredientes a productos', style: TextStyle(color: primary)),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (_) => const PurchaseFunnelScreen()),
-                  );
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.list_alt, color: primary),
-                title: Text('Listas de compra', style: TextStyle(color: primary)),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (_) => const ShoppingListsScreen()),
-                  );
-                },
-              ),
             ],
           ),
-          ListTile(
-            leading: Icon(Icons.restaurant, color: primary),
-            title: Text('Recetas', style: TextStyle(color: primary)),
-            onTap: () {
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const RecipeListScreen()),
-              );
-            },
-          ),
-          ListTile(
-            leading: Icon(LucideIcons.filter, color: primary),
-            title: Text('Planificador', style: TextStyle(color: primary)),
+          _DrawerTile(
+            leading: Icon(Icons.person_outline, color: primary),
+            title: 'Mi Perfil',
+            subtitle: 'Tu cuenta e intolerancias',
+            primary: primary,
             onTap: () {
               Navigator.of(context).pop();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const KitchenFunnelScreen()),
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const UserProfileScreen()),
               );
             },
           ),
@@ -487,6 +507,13 @@ class _AppDrawerState extends State<AppDrawer> {
               },
             ),
             title: Text('Ayuda y soporte', style: TextStyle(color: primary)),
+            subtitle: Text(
+              'Preguntas e incidencias',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.85),
+              ),
+            ),
             onTap: () {
               Navigator.of(context).pop();
               Navigator.of(context).push(
@@ -531,6 +558,41 @@ class _AppDrawerState extends State<AppDrawer> {
       default:
         return null;
     }
+  }
+}
+
+class _DrawerTile extends StatelessWidget {
+  final Widget leading;
+  final String title;
+  final String subtitle;
+  final Color primary;
+  final VoidCallback onTap;
+
+  const _DrawerTile({
+    required this.leading,
+    required this.title,
+    required this.subtitle,
+    required this.primary,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: leading,
+      title: Text(title, style: TextStyle(color: primary)),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Text(
+          subtitle,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            fontSize: 11,
+            color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.85),
+          ),
+        ),
+      ),
+      onTap: onTap,
+    );
   }
 }
 

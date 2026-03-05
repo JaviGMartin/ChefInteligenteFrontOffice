@@ -44,12 +44,29 @@ class ListaCompraCabecera {
   }
 }
 
+/// Referencia mínima a un ingrediente (para ítems que solo tienen ingrediente, sin producto).
+class IngredienteRef {
+  final int id;
+  final String nombre;
+
+  const IngredienteRef({required this.id, required this.nombre});
+
+  factory IngredienteRef.fromJson(Map<String, dynamic> json) {
+    return IngredienteRef(
+      id: _toInt(json['id']),
+      nombre: (json['nombre'] as String?) ?? '',
+    );
+  }
+}
+
 /// Ítem de una lista de compra (lista_compra).
 class ListaCompraItem {
   final int id;
   final int listasCompraId;
   final int? productoId;
   final ProductoRef? producto;
+  final int? ingredienteId;
+  final IngredienteRef? ingrediente;
   final double cantidad;
   final double cantidadCompra;
   final int? unidadMedidaId;
@@ -66,6 +83,8 @@ class ListaCompraItem {
     required this.listasCompraId,
     this.productoId,
     this.producto,
+    this.ingredienteId,
+    this.ingrediente,
     required this.cantidad,
     required this.cantidadCompra,
     this.unidadMedidaId,
@@ -85,6 +104,10 @@ class ListaCompraItem {
       producto: json['producto'] is Map<String, dynamic>
           ? ProductoRef.fromJson(json['producto'] as Map<String, dynamic>)
           : null,
+      ingredienteId: _toIntNullable(json['ingrediente_id']),
+      ingrediente: json['ingrediente'] is Map<String, dynamic>
+          ? IngredienteRef.fromJson(json['ingrediente'] as Map<String, dynamic>)
+          : null,
       cantidad: _toDouble(json['cantidad']),
       cantidadCompra: _toDouble(json['cantidad_compra']),
       unidadMedidaId: _toIntNullable(json['unidad_medida_id']),
@@ -99,6 +122,15 @@ class ListaCompraItem {
           ? ContenedorRef.fromJson(json['contenedor'] as Map<String, dynamic>)
           : null,
     );
+  }
+
+  /// Nombre para mostrar: producto (con marca) o ingrediente cuando no hay producto.
+  String get displayNombre {
+    if (producto != null) {
+      final m = producto!.marca?.trim();
+      return m != null && m.isNotEmpty ? '${producto!.nombre} (${producto!.marca})' : producto!.nombre;
+    }
+    return ingrediente?.nombre ?? 'Ítem';
   }
 
   /// Texto corto para cantidad + empaquetado (ej. "2 pack", "1 bric").

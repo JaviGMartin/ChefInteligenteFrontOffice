@@ -288,6 +288,8 @@ class AuthService {
       name: (userMap['name'] as String?) ?? current?.name ?? 'Usuario',
       email: (userMap['email'] as String?) ?? current?.email ?? '',
       role: (userMap['tipo_suscripcion'] ?? userMap['role']) as String?,
+      planEfectivo: (userMap['plan_efectivo'] ?? userMap['tipo_suscripcion'] ?? userMap['role']) as String? ?? current?.planEfectivo,
+      nutricionistaId: (userMap['nutricionista_id'] as num?)?.toInt() ?? current?.nutricionistaId,
       hogarNombre: hogarNombre,
       avatarUrl: userMap['avatar_url'] as String?,
       birthDate: current?.birthDate,
@@ -307,6 +309,8 @@ class AuthService {
           name: current.name,
           email: current.email,
           role: current.role,
+          planEfectivo: current.planEfectivo,
+          nutricionistaId: current.nutricionistaId,
           hogarNombre: null,
           avatarUrl: current.avatarUrl,
           birthDate: current.birthDate,
@@ -324,6 +328,8 @@ class AuthService {
         name: current.name,
         email: current.email,
         role: current.role,
+        planEfectivo: current.planEfectivo,
+        nutricionistaId: current.nutricionistaId,
         hogarNombre: nombre,
         avatarUrl: current.avatarUrl,
         birthDate: current.birthDate,
@@ -361,6 +367,7 @@ class AuthService {
     final name = user['name'] as String?;
     final email = user['email'] as String?;
     final role = (user['tipo_suscripcion'] ?? user['role']) as String?;
+    final planEfectivo = (user['plan_efectivo'] ?? user['tipo_suscripcion'] ?? user['role']) as String?;
     final avatarUrl = user['avatar_url'] as String?;
     final birthDate = user['birth_date'] as String?;
     final intolerancias = user['intolerancias'] as List<dynamic>?;
@@ -377,6 +384,17 @@ class AuthService {
     }
     if (role != null) {
       await prefs.setString('user_role', role);
+    }
+    if (planEfectivo != null) {
+      await prefs.setString('user_plan_efectivo', planEfectivo);
+    } else {
+      await prefs.remove('user_plan_efectivo');
+    }
+    final nutricionistaId = user['nutricionista_id'];
+    if (nutricionistaId != null && nutricionistaId is num) {
+      await prefs.setString('user_nutricionista_id', nutricionistaId.toInt().toString());
+    } else {
+      await prefs.remove('user_nutricionista_id');
     }
     if (avatarUrl != null) {
       await prefs.setString('user_avatar_url', avatarUrl);
@@ -418,12 +436,14 @@ class AuthService {
     final name = prefs.getString('user_name');
     final email = prefs.getString('user_email');
     final role = prefs.getString('user_role');
+    final planEfectivo = prefs.getString('user_plan_efectivo');
     final hogarNombre = prefs.getString('hogar_nombre');
     final avatarUrl = prefs.getString('user_avatar_url');
     final birthDateStr = prefs.getString('user_birth_date');
     final intoleranciaIdsStr = prefs.getStringList('user_intolerancia_ids');
     final notas = prefs.getString('user_notas');
     final idStr = prefs.getString('user_id');
+    final nutricionistaIdStr = prefs.getString('user_nutricionista_id');
     final nutritionStr = prefs.getString('user_nutrition');
     if (name == null && email == null && role == null) {
       return null;
@@ -443,11 +463,14 @@ class AuthService {
         nutrition = jsonDecode(nutritionStr) as Map<String, dynamic>?;
       } catch (_) {}
     }
+    final nutricionistaId = nutricionistaIdStr != null ? int.tryParse(nutricionistaIdStr) : null;
     return AuthUser(
       id: id,
       name: name ?? 'Usuario de prueba',
       email: email ?? '',
       role: role,
+      planEfectivo: planEfectivo ?? role,
+      nutricionistaId: nutricionistaId,
       hogarNombre: hogarNombre,
       avatarUrl: avatarUrl,
       birthDate: birthDate,
@@ -501,11 +524,14 @@ class AuthService {
     final icc = _toDouble(user['icc']);
     final tmbKcal = _toDouble(user['tmb_kcal']);
     final getEnergeticoKcal = _toDouble(user['get_energetico_kcal']);
+    final nutricionistaId = (user['nutricionista_id'] as num?)?.toInt();
     return AuthUser(
       id: id,
       name: (user['name'] as String?) ?? 'Usuario de prueba',
       email: (user['email'] as String?) ?? '',
       role: (user['tipo_suscripcion'] ?? user['role']) as String?,
+      planEfectivo: (user['plan_efectivo'] ?? user['tipo_suscripcion'] ?? user['role']) as String?,
+      nutricionistaId: nutricionistaId,
       hogarNombre: hogarNombre,
       avatarUrl: avatarUrl != null && avatarUrl.isNotEmpty ? avatarUrl : null,
       birthDate: birthDate,
@@ -607,6 +633,8 @@ class AuthService {
         name: updated.name,
         email: updated.email,
         role: updated.role,
+        planEfectivo: updated.planEfectivo,
+        nutricionistaId: updated.nutricionistaId,
         hogarNombre: updated.hogarNombre ?? current?.hogarNombre,
         avatarUrl: updated.avatarUrl,
         birthDate: updated.birthDate,
@@ -672,6 +700,8 @@ class AuthUser {
   final String name;
   final String email;
   final String? role;
+  final String? planEfectivo;
+  final int? nutricionistaId;
   final String? hogarNombre;
   final String? avatarUrl;
   final DateTime? birthDate;
@@ -700,6 +730,8 @@ class AuthUser {
     required this.name,
     required this.email,
     this.role,
+    this.planEfectivo,
+    this.nutricionistaId,
     this.hogarNombre,
     this.avatarUrl,
     this.birthDate,
@@ -721,4 +753,15 @@ class AuthUser {
     this.tmbKcal,
     this.getEnergeticoKcal,
   });
+
+  bool get esPremiumOGold {
+    final plan = (planEfectivo ?? role ?? '').toLowerCase();
+    return plan == 'premium' || plan == 'gold';
+  }
+
+  /// True si el usuario tiene plan Gold (dietista asignado, recetas del nutricionista, etc.).
+  bool get esGold {
+    final plan = (planEfectivo ?? role ?? '').toLowerCase();
+    return plan == 'gold';
+  }
 }

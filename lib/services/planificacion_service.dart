@@ -8,6 +8,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/planificacion.dart';
 
+/// Valores por defecto de horarios si el backend no los envía (mismos que la migración).
+List<HorarioToma> get _defaultHorariosToma => const [
+  HorarioToma(toma: 'desayuno', horaInicio: '07:00', horaFin: '10:00'),
+  HorarioToma(toma: 'media_manana', horaInicio: '10:00', horaFin: '12:00'),
+  HorarioToma(toma: 'comida', horaInicio: '13:00', horaFin: '16:00'),
+  HorarioToma(toma: 'merienda', horaInicio: '16:00', horaFin: '19:00'),
+  HorarioToma(toma: 'cena', horaInicio: '20:00', horaFin: '23:00'),
+];
+
 class PlanificacionService {
   static const String _androidEmulatorBaseUrl = 'http://10.0.2.2:8000/api';
   static const String _hostIp = '192.168.1.39';
@@ -45,14 +54,18 @@ class PlanificacionService {
     return '$y-$m-$day';
   }
 
-  /// Respuesta del listado de planificaciones con flag de si el usuario puede editar el calendario.
-  Future<({List<Planificacion> list, bool puedeEditarCalendario})> fetchPlanificaciones({
+  /// Respuesta del listado de planificaciones con flag de edición y horarios por periodo.
+  Future<({
+    List<Planificacion> list,
+    bool puedeEditarCalendario,
+    List<HorarioToma> horariosToma,
+  })> fetchPlanificaciones({
     required DateTime from,
     required DateTime to,
   }) async {
     final token = await _getToken();
     if (token == null || token.isEmpty) {
-      return (list: <Planificacion>[], puedeEditarCalendario: true);
+      return (list: <Planificacion>[], puedeEditarCalendario: true, horariosToma: _defaultHorariosToma);
     }
     final uri = Uri.parse('$baseUrl/planificaciones?from=${_fmt(from)}&to=${_fmt(to)}');
     final response = await http.get(uri, headers: _headers(token: token)).timeout(
@@ -73,11 +86,22 @@ class PlanificacionService {
           .toList();
     }
     bool puedeEditarCalendario = true;
+    List<HorarioToma> horariosToma = _defaultHorariosToma;
     final meta = payload['meta'];
-    if (meta is Map<String, dynamic> && meta['puede_editar_calendario'] is bool) {
-      puedeEditarCalendario = meta['puede_editar_calendario'] as bool;
+    if (meta is Map<String, dynamic>) {
+      if (meta['puede_editar_calendario'] is bool) {
+        puedeEditarCalendario = meta['puede_editar_calendario'] as bool;
+      }
+      final raw = meta['horarios_toma'];
+      if (raw is List) {
+        horariosToma = raw
+            .whereType<Map<String, dynamic>>()
+            .map((e) => HorarioToma.fromJson(e))
+            .toList();
+        if (horariosToma.isEmpty) horariosToma = _defaultHorariosToma;
+      }
     }
-    return (list: list, puedeEditarCalendario: puedeEditarCalendario);
+    return (list: list, puedeEditarCalendario: puedeEditarCalendario, horariosToma: horariosToma);
   }
 
   Future<void> crearPlanificacion({

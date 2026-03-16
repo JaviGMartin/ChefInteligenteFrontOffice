@@ -18,6 +18,9 @@ import 'recipe_detail_screen.dart';
 import 'purchase_funnel_screen.dart';
 import 'single_shopping_list_screen.dart';
 
+/// Estado visual del slot en el calendario según la hora actual.
+enum SlotState { past, current, future }
+
 class CalendarPlannerScreen extends StatefulWidget {
   const CalendarPlannerScreen({super.key});
 
@@ -34,6 +37,14 @@ class _CalendarPlannerScreenState extends State<CalendarPlannerScreen> {
     {'key': 'cena', 'label': 'Cena'},
   ];
 
+  static const List<HorarioToma> _defaultHorariosToma = [
+    HorarioToma(toma: 'desayuno', horaInicio: '07:00', horaFin: '10:00'),
+    HorarioToma(toma: 'media_manana', horaInicio: '10:00', horaFin: '12:00'),
+    HorarioToma(toma: 'comida', horaInicio: '13:00', horaFin: '16:00'),
+    HorarioToma(toma: 'merienda', horaInicio: '16:00', horaFin: '19:00'),
+    HorarioToma(toma: 'cena', horaInicio: '20:00', horaFin: '23:00'),
+  ];
+
   final PlanificacionService _service = PlanificacionService();
   final RecipeService _recipeService = RecipeService();
 
@@ -43,6 +54,7 @@ class _CalendarPlannerScreenState extends State<CalendarPlannerScreen> {
   List<Planificacion> _items = [];
   List<Recipe> _recipes = [];
   bool _puedeEditarCalendario = true;
+  List<HorarioToma> _horariosToma = const [];
 
   @override
   void initState() {
@@ -83,6 +95,7 @@ class _CalendarPlannerScreenState extends State<CalendarPlannerScreen> {
         _items = response.list;
         _recipes = recetas;
         _puedeEditarCalendario = response.puedeEditarCalendario;
+        _horariosToma = response.horariosToma.isNotEmpty ? response.horariosToma : _defaultHorariosToma;
         _loading = false;
       });
     } catch (e) {
@@ -405,10 +418,12 @@ class _CalendarPlannerScreenState extends State<CalendarPlannerScreen> {
                 itemCount: 7,
                 itemBuilder: (context, index) {
                   final day = _weekStart.add(Duration(days: index));
+                  final horarios = _horariosToma.isNotEmpty ? _horariosToma : _defaultHorariosToma;
                   return _DaySection(
                     date: day,
                     items: _items,
                     tomas: _tomas,
+                    horariosToma: horarios,
                     puedeEditar: _puedeEditarCalendario,
                     onAdd: (tomaKey) => _openSelector(fecha: day, toma: tomaKey),
                     onRemove: _eliminarPlanificacion,
@@ -427,6 +442,7 @@ class _DaySection extends StatelessWidget {
     required this.date,
     required this.items,
     required this.tomas,
+    required this.horariosToma,
     required this.puedeEditar,
     required this.onAdd,
     required this.onRemove,
@@ -435,9 +451,25 @@ class _DaySection extends StatelessWidget {
   final DateTime date;
   final List<Planificacion> items;
   final List<Map<String, String>> tomas;
+  final List<HorarioToma> horariosToma;
   final bool puedeEditar;
   final void Function(String tomaKey) onAdd;
   final void Function(int id) onRemove;
+
+  /// Calcula el estado del slot (pasado / actual / pendiente) en hora local.
+  static SlotState slotStateFor(DateTime date, String tomaKey, List<HorarioToma> horarios) {
+    final match = horarios.where((e) => e.toma == tomaKey).toList();
+    if (match.isEmpty) return SlotState.future;
+    final h = match.first;
+    final (hi, mi) = HorarioToma.parseHora(h.horaInicio);
+    final (hf, mf) = HorarioToma.parseHora(h.horaFin);
+    final inicio = DateTime(date.year, date.month, date.day, hi, mi);
+    final fin = DateTime(date.year, date.month, date.day, hf, mf);
+    final now = DateTime.now();
+    if (now.isAfter(fin)) return SlotState.past;
+    if (!now.isBefore(inicio) && now.isBefore(fin)) return SlotState.current;
+    return SlotState.future;
+  }
 
   String _fmt(DateTime d) {
     final y = d.year.toString().padLeft(4, '0');
@@ -471,6 +503,7 @@ class _DaySection extends StatelessWidget {
               _TomaRow(
                 tomaLabel: toma['label'] ?? 'Toma',
                 items: items.where((p) => p.fecha == fechaKey && p.toma == toma['key']).toList(),
+                slotState: slotStateFor(date, toma['key'] ?? '', horariosToma),
                 puedeEditar: puedeEditar,
                 onAdd: () => onAdd(toma['key'] ?? ''),
                 onRemove: onRemove,
@@ -514,6 +547,7 @@ class _TomaRow extends StatelessWidget {
   const _TomaRow({
     required this.tomaLabel,
     required this.items,
+    required this.slotState,
     required this.puedeEditar,
     required this.onAdd,
     required this.onRemove,
@@ -521,13 +555,15 @@ class _TomaRow extends StatelessWidget {
 
   final String tomaLabel;
   final List<Planificacion> items;
+  final SlotState slotState;
   final bool puedeEditar;
   final VoidCallback onAdd;
   final void Function(int id) onRemove;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final decoration = _decorationForSlotState(slotState);
+    final child = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
@@ -656,6 +692,34 @@ class _TomaRow extends StatelessWidget {
           ),
       ],
     );
+    if (decoration != null) {
+      return Container(
+        decoration: decoration,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: child,
+      );
+    }
+    return child;
+  }
+
+  static BoxDecoration? _decorationForSlotState(SlotState state) {
+    switch (state) {
+      case SlotState.past:
+        return BoxDecoration(
+          color: Colors.amber.shade50,
+          borderRadius: BorderRadius.circular(8),
+        );
+      case SlotState.current:
+        return BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+            left: BorderSide(color: AppColors.brandBlue, width: 4),
+          ),
+        );
+      case SlotState.future:
+        return null; // fondo blanco / tarjeta por defecto
+    }
   }
 
   static Future<void> _enviarACocina(BuildContext context, int recetaId) async {

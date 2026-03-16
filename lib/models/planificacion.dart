@@ -49,6 +49,35 @@ class Planificacion {
   }
 }
 
+/// Horario de un periodo de toma (desayuno, comida, etc.) para el calendario.
+class HorarioToma {
+  final String toma;
+  final String horaInicio; // "07:00"
+  final String horaFin;   // "10:00"
+
+  const HorarioToma({
+    required this.toma,
+    required this.horaInicio,
+    required this.horaFin,
+  });
+
+  factory HorarioToma.fromJson(Map<String, dynamic> json) {
+    return HorarioToma(
+      toma: (json['toma'] as String?) ?? '',
+      horaInicio: (json['hora_inicio'] as String?) ?? '00:00',
+      horaFin: (json['hora_fin'] as String?) ?? '23:59',
+    );
+  }
+
+  /// Parsea "HH:mm" a (hour, minute).
+  static (int, int) parseHora(String s) {
+    final parts = s.split(':');
+    final h = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 0 : 0;
+    final m = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    return (h, m);
+  }
+}
+
 class PlanificacionReceta {
   final int id;
   final String titulo;
